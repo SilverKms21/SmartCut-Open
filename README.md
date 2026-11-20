@@ -1,4 +1,4 @@
-# SmartCut
+# SmartCut-Open
 
 Ferramenta de automação de edição de vídeo e áudio que analisa a faixa sonora via **FFmpeg** (`silencedetect`), remove pausas e silêncios automaticamente, exporta timelines padronizadas em **FCPXML** e **EDL**, e renderiza prévias ou vídeos completos em **MP4**.
 
