@@ -1,0 +1,10 @@
+# Este projeto utiliza exclusivamente a biblioteca padrão do Python 3.9+
+# (tkinter, argparse, json, subprocess, xml.etree.ElementTree, fractions).
+# Nenhum pacote externo via pip é necessário para execução.
+#
+# Dependências de sistema (instale via gerenciador da sua distribuição Linux):
+#   - ffmpeg (inclui ffprobe)
+#   - python3-tk / tk (interface gráfica Tkinter)
+#
+# Opcional (apenas para gerar binário executável único):
+# pyinstaller>=6.0
