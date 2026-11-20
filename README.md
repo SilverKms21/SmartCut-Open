@@ -38,24 +38,32 @@ O projeto utiliza exclusivamente a **biblioteca padrão do Python 3.9+** (sem pa
 
 ---
 
-## Instalação
+2. **(Opcional) Compile um executável único para Linux com PyInstaller:**
 
-1. Clone o repositório e dê permissão de execução ao script:
-   ```bash
-   git clone [https://github.com/oudim/smartcut.git](https://github.com/oudim/smartcut.git)
-   cd smartcut
-   chmod +x smartcut.py
-   ```
-
-2. *(Opcional)* Compile um executável único para Linux com PyInstaller:
+   Primeiro, gere o binário em um ambiente virtual temporário:
    ```bash
    python3 -m venv .venv-build
    .venv-build/bin/pip install --upgrade pip pyinstaller
    .venv-build/bin/pyinstaller --onefile --windowed --name smartcut --hidden-import tkinter smartcut.py
-   mkdir -p ~/.local/bin && cp dist/smartcut ~/.local/bin/smartcut
-   rm -rf build dist smartcut.spec .venv-build
    ```
 
+   Em seguida, escolha onde deseja deixar o executável gerado:
+
+   - **Opção A — Manter o executável na mesma pasta do `smartcut.py` (portátil):**
+     ```bash
+     cp dist/smartcut ./smartcut
+     rm -rf build dist smartcut.spec .venv-build
+     ```
+     *(Para abrir depois a partir da pasta: `./smartcut`)*
+
+   - **Opção B — Instalar no sistema para o seu usuário (`~/.local/bin`):**
+     ```bash
+     mkdir -p ~/.local/bin && cp dist/smartcut ~/.local/bin/smartcut
+     rm -rf build dist smartcut.spec .venv-build
+     ```
+     *(Para abrir de qualquer diretório: `smartcut`)*
+
+---
 ---
 
 ## Como Usar
