@@ -1,4 +1,3 @@
-cat << 'EOF' > .github/workflows/build.yml
 name: Build & Release SmartCut
 
 on:
@@ -96,4 +95,3 @@ jobs:
           files: |
             release-assets/smartcut-linux
             release-assets/smartcut-windows.exe
-EOF
