@@ -1,4 +1,4 @@
-cat << 'EOF' > .github/workflows/build.yml
+cat << 'EOF' > .github/workflows/main.yml
 name: Build & Release SmartCut
 
 on:
