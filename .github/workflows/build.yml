@@ -1,3 +1,4 @@
+cat << 'EOF' > .github/workflows/build.yml
 name: Build & Release SmartCut
 
 on:
@@ -57,8 +58,8 @@ jobs:
         shell: pwsh
         run: |
           python -m venv .venv
-          .\.venv\Scripts\pip install --upgrade pip pyinstaller
-          .\.venv\Scripts\pyinstaller `
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip pyinstaller
+          .\.venv\Scripts\python.exe -m PyInstaller `
             --onefile `
             --windowed `
             --name smartcut-windows `
@@ -95,3 +96,4 @@ jobs:
           files: |
             release-assets/smartcut-linux
             release-assets/smartcut-windows.exe
+EOF
