@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-SmartCut - Corte Automático de Silêncios + FCPXML / EDL + Renderização (PT-BR / EN-US | Dark / Light)
-- Detecção de silêncio via FFmpeg (silencedetect)
+SmartCut - Corte Automático de Silêncios + FCPXML / EDL + Renderização
+- Arrastar e Soltar (Drag & Drop) arquivos de mídia ou timelines (.fcpxml / .edl)
+- Seleção explícita de Entrada Original e Saída do Arquivo preservada
 - Interface bilíngue (Português BR / English US) com temas Claro e Escuro
-- Escopo selecionável: Apenas 30s (prévia rápida) ou Vídeo todo
-- Seleção explícita de Entrada Original e Saída do Arquivo
-- Exportação e Importação de FCPXML (.fcpxml), EDL CMX 3600 (.edl) e JSONL
+- Detecção de silêncio via FFmpeg (silencedetect) e renderização MP4 / M4A
 """
 
 import argparse
@@ -23,6 +22,15 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD  # type: ignore
+
+    HAS_TKINTERDND2 = True
+except ImportError:
+    DND_FILES = "DND_Files"
+    TkinterDnD = None
+    HAS_TKINTERDND2 = False
+
 
 # ==============================================================================
 # INTERNACIONALIZAÇÃO (PT-BR / EN-US) E TEMAS (DARK / LIGHT)
@@ -34,6 +42,12 @@ LANG_LABELS = {
 }
 LABEL_TO_LANG = {v: k for k, v in LANG_LABELS.items()}
 
+TIMELINE_EXTENSIONS = {".fcpxml", ".xml", ".edl"}
+MEDIA_EXTENSIONS = {
+    ".mp4", ".mkv", ".mov", ".webm", ".avi", ".flv", ".wmv", ".m4v",
+    ".wav", ".mp3", ".flac", ".m4a", ".ogg", ".opus", ".aac", ".wma",
+}
+
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "pt_BR": {
         "window_title": "SmartCut — Corte Inteligente de Silêncios",
@@ -42,6 +56,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "theme_dark": "Escuro",
         "theme_light": "Claro",
         "card_io": "1. Entrada Original & Saída do Arquivo",
+        "drop_title": "Arraste e solte um vídeo, áudio ou timeline (.fcpxml / .edl) aqui",
+        "drop_sub_active": "Solte o arquivo em qualquer lugar da janela • Ou clique aqui para procurar",
+        "drop_sub_fallback": "Clique aqui para procurar ou cole (Ctrl+V) • Instale 'tkinterdnd2' para arrastar direto",
+        "drop_hover": "Solte o arquivo agora para carregar!",
         "no_file": "Nenhum arquivo selecionado",
         "audio_badge": "Áudio • {dur}",
         "lbl_input": "Entrada Original:",
@@ -78,6 +96,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "status_error": "Erro durante a execução",
         "log_preset_dynamic": "Preset 'Dinâmico' aplicado (cortes rápidos e secos).",
         "log_preset_narration": "Preset 'Narração' aplicado (margem de respiro natural).",
+        "log_file_dropped": "Arquivo carregado via arrastar e soltar: {name}",
+        "log_file_pasted": "Arquivo carregado via área de transferência: {name}",
+        "log_drop_invalid": "Nenhum arquivo válido reconhecido ao soltar.",
         "log_tl_loaded": "Timeline carregada: {name} (mídia: {media})",
         "log_tl_loaded_no_media": "Timeline carregada: {name} (selecione a entrada original acima).",
         "log_tl_warn": "Aviso ao inspecionar timeline: {err}",
@@ -122,6 +143,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "theme_dark": "Dark",
         "theme_light": "Light",
         "card_io": "1. Original Input & Output File",
+        "drop_title": "Drag & drop a video, audio, or timeline (.fcpxml / .edl) file here",
+        "drop_sub_active": "Drop anywhere on this window • Or click here to browse",
+        "drop_sub_fallback": "Click here to browse or paste (Ctrl+V) • Install 'tkinterdnd2' for native drag & drop",
+        "drop_hover": "Release file now to load!",
         "no_file": "No file selected",
         "audio_badge": "Audio • {dur}",
         "lbl_input": "Original Input:",
@@ -158,6 +183,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "status_error": "Error during execution",
         "log_preset_dynamic": "Preset 'Dynamic' applied (tight, snappy cuts).",
         "log_preset_narration": "Preset 'Narration' applied (natural breathing room).",
+        "log_file_dropped": "File loaded via drag & drop: {name}",
+        "log_file_pasted": "File loaded from clipboard: {name}",
+        "log_drop_invalid": "No valid media or timeline file recognized on drop.",
         "log_tl_loaded": "Timeline loaded: {name} (media: {media})",
         "log_tl_loaded_no_media": "Timeline loaded: {name} (select original input above).",
         "log_tl_warn": "Warning inspecting timeline: {err}",
@@ -217,6 +245,10 @@ THEMES: Dict[str, Dict[str, str]] = {
         "log_fg": "#cbd5e1",
         "disabled_bg": "#1e293b",
         "disabled_fg": "#64748b",
+        "drop_bg": "#11151d",
+        "drop_border": "#334155",
+        "drop_hover_bg": "#172554",
+        "drop_hover_border": "#60a5fa",
     },
     "light": {
         "bg": "#f1f5f9",
@@ -237,6 +269,10 @@ THEMES: Dict[str, Dict[str, str]] = {
         "log_fg": "#1e293b",
         "disabled_bg": "#e2e8f0",
         "disabled_fg": "#94a3b8",
+        "drop_bg": "#f8fafc",
+        "drop_border": "#94a3b8",
+        "drop_hover_bg": "#dbeafe",
+        "drop_hover_border": "#2563eb",
     },
 }
 
@@ -942,8 +978,31 @@ def run_pipeline(
 
 
 # ==============================================================================
-# INTERFACE GRÁFICA (TKINTER - PT-BR / EN-US & TEMAS CLARO / ESCURO)
+# INTERFACE GRÁFICA (DRAG & DROP + PT-BR / EN-US + TEMAS CLARO / ESCURO)
 # ==============================================================================
+
+def _parse_file_paths(raw_data: str, root) -> List[Path]:
+    """Converte dados de Drop (Tcl list ou URIs file://) em lista de caminhos reais."""
+    if not raw_data:
+        return []
+    try:
+        items = list(root.tk.splitlist(raw_data))
+    except Exception:
+        items = raw_data.splitlines()
+
+    resolved: List[Path] = []
+    for item in items:
+        clean = item.strip()
+        if not clean:
+            continue
+        if clean.startswith("file://"):
+            parsed = urlparse(clean)
+            clean = unquote(parsed.path)
+        candidate = Path(clean).expanduser()
+        if candidate.is_file():
+            resolved.append(candidate)
+    return resolved
+
 
 def launch_gui() -> None:
     try:
@@ -958,8 +1017,10 @@ def launch_gui() -> None:
         sys.exit(1)
 
     class SmartCutApp:
-        def __init__(self, root: tk.Tk):
+        def __init__(self, root: tk.Tk, has_system_tkdnd: bool = False):
             self.root = root
+            self.dnd_enabled = HAS_TKINTERDND2 or has_system_tkdnd
+
             prefs = load_settings()
             self.lang: str = prefs["lang"]
             self.theme_name: str = prefs["theme"]
@@ -978,10 +1039,11 @@ def launch_gui() -> None:
             self._last_media_info: Optional[MediaInfo] = None
             self._last_media_name: Optional[str] = None
             self._status_key: str = "status_ready"
+            self._is_dragging_over: bool = False
 
             self.root.title(self.tr("window_title"))
-            self.root.geometry("800x770")
-            self.root.minsize(710, 690)
+            self.root.geometry("810x835")
+            self.root.minsize(710, 750)
 
             self.style = ttk.Style()
             if "clam" in self.style.theme_names():
@@ -994,6 +1056,10 @@ def launch_gui() -> None:
             self.import_tl_var = tk.StringVar()
             self.media_badge_var = tk.StringVar(value=self.tr("no_file"))
             self.status_var = tk.StringVar(value=self.tr(self._status_key))
+            self.drop_title_var = tk.StringVar(value=self.tr("drop_title"))
+            self.drop_sub_var = tk.StringVar(
+                value=self.tr("drop_sub_active" if self.dnd_enabled else "drop_sub_fallback")
+            )
             self._output_manually_edited = False
             self._last_output_dir: Optional[Path] = None
 
@@ -1009,6 +1075,7 @@ def launch_gui() -> None:
             self.export_jsonl_var = tk.BooleanVar(value=False)
 
             self._build_ui(tk, ttk, scrolledtext)
+            self._setup_drag_and_drop()
             self.apply_theme(self.theme_name)
 
         def tr(self, key: str, **kwargs) -> str:
@@ -1085,7 +1152,6 @@ def launch_gui() -> None:
             controls_box = ttk.Frame(top_bar)
             controls_box.pack(side=tk.RIGHT, anchor=tk.CENTER)
 
-            # Idioma
             ttk.Label(
                 controls_box,
                 textvariable=self._tvar(tk, "lbl_lang"),
@@ -1103,7 +1169,6 @@ def launch_gui() -> None:
             self.lang_combo.pack(side=tk.LEFT, padx=(0, 12))
             self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
 
-            # Seletor de Tema (Escuro / Claro)
             self.dark_btn = ttk.Button(
                 controls_box,
                 textvariable=self._tvar(tk, "theme_dark"),
@@ -1119,7 +1184,7 @@ def launch_gui() -> None:
             self.light_btn.pack(side=tk.LEFT)
 
             # ------------------------------------------------------------------
-            # 1. Cartão: Entrada Original & Saída do Arquivo
+            # 1. Cartão: Zona de Arrastar & Soltar + Entrada Original & Saída
             # ------------------------------------------------------------------
             def add_media_badge(hdr):
                 self.badge_label = tk.Label(
@@ -1132,6 +1197,35 @@ def launch_gui() -> None:
                 self.badge_label.pack(side=tk.RIGHT)
 
             io_card = self._make_card(tk, self.main_frame, "card_io", add_media_badge)
+
+            # Área interativa de Arrastar e Soltar (também clicável)
+            self.drop_zone = tk.Frame(
+                io_card,
+                highlightthickness=2,
+                padx=12,
+                pady=10,
+                cursor="hand2",
+            )
+            self.drop_zone.pack(fill=tk.X, pady=(0, 10))
+
+            self.drop_title_lbl = tk.Label(
+                self.drop_zone,
+                textvariable=self.drop_title_var,
+                font=("sans-serif", 9, "bold"),
+                cursor="hand2",
+            )
+            self.drop_title_lbl.pack(anchor=tk.CENTER)
+
+            self.drop_sub_lbl = tk.Label(
+                self.drop_zone,
+                textvariable=self.drop_sub_var,
+                font=("sans-serif", 8),
+                cursor="hand2",
+            )
+            self.drop_sub_lbl.pack(anchor=tk.CENTER, pady=(2, 0))
+
+            for w in (self.drop_zone, self.drop_title_lbl, self.drop_sub_lbl):
+                w.bind("<Button-1>", lambda _e: self.browse_input())
 
             # Entrada Original
             in_row = tk.Frame(io_card)
@@ -1379,7 +1473,7 @@ def launch_gui() -> None:
 
             self.log_box = scrolledtext.ScrolledText(
                 self.log_card,
-                height=7,
+                height=6,
                 font=("monospace", 9),
                 relief=tk.FLAT,
                 state=tk.DISABLED,
@@ -1406,6 +1500,107 @@ def launch_gui() -> None:
             scale.pack(fill=tk.X, pady=(2, 0))
 
             variable.trace_add("write", lambda *_: val_label.config(text=fmt.format(variable.get())))
+
+        # ----------------------------------------------------------------------
+        # Configuração de Arrastar & Soltar (Drag & Drop + Colar Ctrl+V)
+        # ----------------------------------------------------------------------
+
+        def _register_dnd_target(self, widget) -> None:
+            if HAS_TKINTERDND2:
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind("<<DragEnter>>", self._on_drag_enter)
+                widget.dnd_bind("<<DragLeave>>", self._on_drag_leave)
+                widget.dnd_bind("<<Drop>>", self._on_drop_files)
+            elif self.dnd_enabled:
+                widget.tk.call("tkdnd::drop_target", "register", widget._w, "DND_Files")
+                widget.bind("<<DragEnter>>", self._on_drag_enter)
+                widget.bind("<<DragLeave>>", self._on_drag_leave)
+                widget.bind("<<Drop>>", self._on_drop_files)
+
+        def _setup_drag_and_drop(self) -> None:
+            # Atalho global Ctrl+V para colar arquivos copiados do gerenciador de arquivos
+            self.root.bind_all("<Control-v>", self._on_paste_clipboard)
+            self.root.bind_all("<Control-V>", self._on_paste_clipboard)
+
+            if not self.dnd_enabled:
+                return
+
+            for target in (self.root, self.drop_zone, self.drop_title_lbl, self.drop_sub_lbl):
+                try:
+                    self._register_dnd_target(target)
+                except Exception:
+                    pass
+
+        def _set_drop_highlight(self, active: bool) -> None:
+            self._is_dragging_over = active
+            t = THEMES[self.theme_name]
+            if active:
+                self.drop_title_var.set(self.tr("drop_hover"))
+                self.drop_zone.configure(
+                    bg=t["drop_hover_bg"],
+                    highlightbackground=t["drop_hover_border"],
+                )
+                self.drop_title_lbl.configure(bg=t["drop_hover_bg"], fg=t["title_accent"])
+                self.drop_sub_lbl.configure(bg=t["drop_hover_bg"], fg=t["fg"])
+            else:
+                self.drop_title_var.set(self.tr("drop_title"))
+                self.drop_zone.configure(
+                    bg=t["drop_bg"],
+                    highlightbackground=t["drop_border"],
+                )
+                self.drop_title_lbl.configure(bg=t["drop_bg"], fg=t["fg"])
+                self.drop_sub_lbl.configure(bg=t["drop_bg"], fg=t["muted"])
+
+        def _on_drag_enter(self, _event=None):
+            self._set_drop_highlight(True)
+            return "copy"
+
+        def _on_drag_leave(self, _event=None):
+            self._set_drop_highlight(False)
+
+        def _on_drop_files(self, event):
+            self._set_drop_highlight(False)
+            raw_data = getattr(event, "data", "")
+            paths = _parse_file_paths(raw_data, self.root)
+            if not paths:
+                self.append_log(self.tr("log_drop_invalid"))
+                return "break"
+            self._handle_incoming_files(paths, source_key="log_file_dropped")
+            return "break"
+
+        def _on_paste_clipboard(self, event=None):
+            try:
+                clip = self.root.clipboard_get()
+            except Exception:
+                return
+            paths = _parse_file_paths(clip, self.root)
+            if not paths:
+                return
+            self._handle_incoming_files(paths, source_key="log_file_pasted")
+            return "break"
+
+        def _handle_incoming_files(self, paths: List[Path], source_key: str) -> None:
+            media_candidates: List[Path] = []
+            tl_candidates: List[Path] = []
+
+            for p in paths:
+                ext = p.suffix.lower()
+                if ext in TIMELINE_EXTENSIONS:
+                    tl_candidates.append(p)
+                elif ext in MEDIA_EXTENSIONS or p.is_file():
+                    media_candidates.append(p)
+
+            if media_candidates:
+                chosen_media = media_candidates[0]
+                self.media_var.set(str(chosen_media))
+                self._output_manually_edited = False
+                self._sync_default_output(force=True)
+                self._probe_and_update_badge(chosen_media)
+                self.append_log(self.tr(source_key, name=chosen_media.name))
+
+            if tl_candidates:
+                chosen_tl = tl_candidates[0]
+                self._load_timeline_file(chosen_tl, log_drop_key=source_key if not media_candidates else None)
 
         # ----------------------------------------------------------------------
         # Controle de Tema e Idioma
@@ -1568,6 +1763,7 @@ def launch_gui() -> None:
                 lbl.configure(bg=t["card_bg"], fg=t["muted"])
 
             self.badge_label.configure(bg=t["badge_bg"], fg=t["badge_fg"])
+            self._set_drop_highlight(self._is_dragging_over)
 
             for wrap in self._entry_wrappers:
                 wrap.configure(bg=t["input_bg"], highlightbackground=t["card_border"])
@@ -1589,6 +1785,12 @@ def launch_gui() -> None:
             for key, var in self._i18n_bindings:
                 var.set(self.tr(key))
 
+            self.drop_title_var.set(
+                self.tr("drop_hover" if self._is_dragging_over else "drop_title")
+            )
+            self.drop_sub_var.set(
+                self.tr("drop_sub_active" if self.dnd_enabled else "drop_sub_fallback")
+            )
             self.status_var.set(self.tr(self._status_key))
             self._update_run_label()
             self._refresh_media_badge()
@@ -1740,6 +1942,26 @@ def launch_gui() -> None:
             else:
                 self.append_log(self.tr("log_no_out_dir"))
 
+        def _load_timeline_file(self, tl_path: Path, log_drop_key: Optional[str] = None) -> None:
+            self.import_tl_var.set(str(tl_path))
+            self._update_run_label()
+            if log_drop_key:
+                self.append_log(self.tr(log_drop_key, name=tl_path.name))
+            try:
+                if tl_path.suffix.lower() in (".fcpxml", ".xml"):
+                    _, media_ref = import_fcpxml(tl_path)
+                else:
+                    _, media_ref = import_edl(tl_path)
+                if media_ref and media_ref.exists():
+                    self.media_var.set(str(media_ref))
+                    self._probe_and_update_badge(media_ref)
+                    self._sync_default_output(force=False)
+                    self.append_log(self.tr("log_tl_loaded", name=tl_path.name, media=media_ref.name))
+                else:
+                    self.append_log(self.tr("log_tl_loaded_no_media", name=tl_path.name))
+            except Exception as exc:
+                self.append_log(self.tr("log_tl_warn", err=exc))
+
         def browse_timeline(self) -> None:
             from tkinter import filedialog
             path = filedialog.askopenfilename(
@@ -1750,23 +1972,7 @@ def launch_gui() -> None:
                 ],
             )
             if path:
-                tl_path = Path(path)
-                self.import_tl_var.set(str(tl_path))
-                self._update_run_label()
-                try:
-                    if tl_path.suffix.lower() in (".fcpxml", ".xml"):
-                        _, media_ref = import_fcpxml(tl_path)
-                    else:
-                        _, media_ref = import_edl(tl_path)
-                    if media_ref and media_ref.exists():
-                        self.media_var.set(str(media_ref))
-                        self._probe_and_update_badge(media_ref)
-                        self._sync_default_output(force=False)
-                        self.append_log(self.tr("log_tl_loaded", name=tl_path.name, media=media_ref.name))
-                    else:
-                        self.append_log(self.tr("log_tl_loaded_no_media", name=tl_path.name))
-                except Exception as exc:
-                    self.append_log(self.tr("log_tl_warn", err=exc))
+                self._load_timeline_file(Path(path))
 
         def clear_timeline(self) -> None:
             self.import_tl_var.set("")
@@ -1855,8 +2061,18 @@ def launch_gui() -> None:
             self.progress.stop()
             self.run_btn.configure(state=tk.NORMAL)
 
-    root = tk.Tk()
-    SmartCutApp(root)
+    if HAS_TKINTERDND2 and TkinterDnD is not None:
+        root = TkinterDnD.Tk()
+        has_system_tkdnd = True
+    else:
+        root = tk.Tk()
+        try:
+            root.tk.eval("package require tkdnd")
+            has_system_tkdnd = True
+        except Exception:
+            has_system_tkdnd = False
+
+    SmartCutApp(root, has_system_tkdnd=has_system_tkdnd)
     root.mainloop()
 
 
