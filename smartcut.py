@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-SmartCut - Corte Automático de Silêncios + FCPXML / EDL + Renderização (GUI + CLI)
+SmartCut - Corte Automático de Silêncios + FCPXML / EDL + Renderização (PT-BR / EN-US | Dark / Light)
 - Detecção de silêncio via FFmpeg (silencedetect)
+- Interface bilíngue (Português BR / English US) com temas Claro e Escuro
 - Escopo selecionável: Apenas 30s (prévia rápida) ou Vídeo todo
 - Seleção explícita de Entrada Original e Saída do Arquivo
-- Exportação e Importação de FCPXML (.fcpxml) e EDL CMX 3600 (.edl)
-- Renderização direta de MP4 cortado e exportação de lista de cortes em JSONL
+- Exportação e Importação de FCPXML (.fcpxml), EDL CMX 3600 (.edl) e JSONL
 """
 
 import argparse
@@ -20,9 +20,264 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+
+# ==============================================================================
+# INTERNACIONALIZAÇÃO (PT-BR / EN-US) E TEMAS (DARK / LIGHT)
+# ==============================================================================
+
+LANG_LABELS = {
+    "pt_BR": "Português (BR)",
+    "en_US": "English (US)",
+}
+LABEL_TO_LANG = {v: k for k, v in LANG_LABELS.items()}
+
+TRANSLATIONS: Dict[str, Dict[str, str]] = {
+    "pt_BR": {
+        "window_title": "SmartCut — Corte Inteligente de Silêncios",
+        "subtitle": "Remoção automática de silêncios, intercâmbio FCPXML / EDL e renderização",
+        "lbl_lang": "Idioma:",
+        "theme_dark": "Escuro",
+        "theme_light": "Claro",
+        "card_io": "1. Entrada Original & Saída do Arquivo",
+        "no_file": "Nenhum arquivo selecionado",
+        "audio_badge": "Áudio • {dur}",
+        "lbl_input": "Entrada Original:",
+        "btn_browse_in": "Escolher Entrada...",
+        "lbl_output": "Saída do Arquivo:",
+        "btn_save_as": "Salvar Como...",
+        "btn_folder": "Pasta...",
+        "lbl_timeline": "Timeline (Opc.):",
+        "btn_import_tl": "Importar FCPXML / EDL...",
+        "btn_clear": "Limpar",
+        "card_params": "2. Parâmetros de Corte Automático",
+        "preset_dynamic": "Preset: Dinâmico",
+        "preset_narration": "Preset: Narração",
+        "slider_threshold": "Limiar de Silêncio (dB):",
+        "slider_min_silence": "Silêncio Mínimo (s):",
+        "slider_padding": "Margem / Padding (s):",
+        "slider_merge_gap": "Fusão de Cortes (s):",
+        "card_export": "3. Duração & Formatos Exportados",
+        "lbl_scope": "Escopo:",
+        "radio_30s": "Apenas 30s (Prévia rápida)",
+        "radio_full": "Vídeo todo",
+        "chk_mp4": "Renderizar MP4 (.mp4)",
+        "chk_fcpxml": "Timeline FCPXML (.fcpxml)",
+        "chk_edl": "Timeline EDL (.edl)",
+        "chk_jsonl": "Lista JSONL (.jsonl)",
+        "btn_run_30s": "Executar Prévia (Primeiros 30s)",
+        "btn_run_full": "Executar no Vídeo Todo",
+        "btn_run_tl": "Processar Timeline Importada",
+        "btn_open_dir": "Abrir Pasta de Saída",
+        "card_log": "Log de Execução",
+        "status_ready": "Pronto para processar",
+        "status_running": "Processando...",
+        "status_done": "Concluído com sucesso",
+        "status_error": "Erro durante a execução",
+        "log_preset_dynamic": "Preset 'Dinâmico' aplicado (cortes rápidos e secos).",
+        "log_preset_narration": "Preset 'Narração' aplicado (margem de respiro natural).",
+        "log_tl_loaded": "Timeline carregada: {name} (mídia: {media})",
+        "log_tl_loaded_no_media": "Timeline carregada: {name} (selecione a entrada original acima).",
+        "log_tl_warn": "Aviso ao inspecionar timeline: {err}",
+        "log_tl_cleared": "Timeline importada removida; modo automático reativado.",
+        "log_no_out_dir": "Nenhuma pasta de saída existente para abrir ainda.",
+        "dlg_warn_title": "Aviso",
+        "dlg_err_title": "Erro",
+        "dlg_warn_no_input": "Selecione uma Entrada Original ou importe uma timeline FCPXML/EDL.",
+        "dlg_err_in_not_found": "Arquivo de entrada não encontrado:\n{path}",
+        "dlg_err_tl_not_found": "Arquivo de timeline não encontrado:\n{path}",
+        "dlg_in_title": "Selecione o arquivo de entrada original",
+        "dlg_out_file_title": "Definir arquivo e pasta de saída",
+        "dlg_out_dir_title": "Escolher pasta de saída",
+        "dlg_tl_title": "Importar timeline FCPXML ou EDL",
+        "ft_media": "Vídeos e Áudios",
+        "ft_all": "Todos os arquivos",
+        "ft_mp4": "Vídeo MP4",
+        "ft_fcpxml": "Timeline FCPXML",
+        "ft_edl": "Timeline EDL",
+        "ft_timelines": "Timelines (FCPXML / EDL)",
+        "pipe_import": "1/3 Importando cortes de {name}...",
+        "pipe_imported_info": "    Mídia: {media} | Clipes importados: {count} | Duração cortada: {dur}",
+        "pipe_scope_preview": "primeiros {sec}s",
+        "pipe_scope_full": "vídeo completo",
+        "pipe_scope_tl": "timeline importada ({count} clipes)",
+        "pipe_analyzing": "1/3 Analisando silêncios ({scope}) em: {name}...",
+        "pipe_no_speech": "Nenhum trecho com fala detectado nesse intervalo. Tente diminuir o limiar de dB (ex.: -38 dB).",
+        "pipe_analyzed_info": "    Analisado: {orig} -> Cortado: {cut} (-{saved:.2f}s removidos | {count} clipes)",
+        "pipe_dest": "    Destino: {dest}.*",
+        "pipe_fcpxml_saved": "2/3 FCPXML salvo: {name}",
+        "pipe_edl_saved": "2/3 EDL salvo: {name}",
+        "pipe_jsonl_saved": "2/3 JSONL salvo: {name}",
+        "pipe_tl_disabled": "2/3 Exportação de timelines desativada.",
+        "pipe_rendering": "3/3 Renderizando arquivo ({scope}) -> {name}...",
+        "pipe_done": "    Concluído: {path}",
+        "pipe_render_disabled": "3/3 Renderização direta de MP4 desativada.",
+    },
+    "en_US": {
+        "window_title": "SmartCut — Intelligent Silence Remover",
+        "subtitle": "Automated silence removal, FCPXML / EDL interchange, and rendering",
+        "lbl_lang": "Language:",
+        "theme_dark": "Dark",
+        "theme_light": "Light",
+        "card_io": "1. Original Input & Output File",
+        "no_file": "No file selected",
+        "audio_badge": "Audio • {dur}",
+        "lbl_input": "Original Input:",
+        "btn_browse_in": "Browse Input...",
+        "lbl_output": "Output File:",
+        "btn_save_as": "Save As...",
+        "btn_folder": "Folder...",
+        "lbl_timeline": "Timeline (Opt.):",
+        "btn_import_tl": "Import FCPXML / EDL...",
+        "btn_clear": "Clear",
+        "card_params": "2. Auto-Cut Parameters",
+        "preset_dynamic": "Preset: Dynamic",
+        "preset_narration": "Preset: Narration",
+        "slider_threshold": "Silence Threshold (dB):",
+        "slider_min_silence": "Min Silence Duration (s):",
+        "slider_padding": "Speech Padding (s):",
+        "slider_merge_gap": "Merge Gap (s):",
+        "card_export": "3. Scope & Export Formats",
+        "lbl_scope": "Scope:",
+        "radio_30s": "First 30s (Quick preview)",
+        "radio_full": "Full video",
+        "chk_mp4": "Render MP4 (.mp4)",
+        "chk_fcpxml": "FCPXML Timeline (.fcpxml)",
+        "chk_edl": "EDL Timeline (.edl)",
+        "chk_jsonl": "JSONL List (.jsonl)",
+        "btn_run_30s": "Run Preview (First 30s)",
+        "btn_run_full": "Run on Full Video",
+        "btn_run_tl": "Process Imported Timeline",
+        "btn_open_dir": "Open Output Folder",
+        "card_log": "Execution Log",
+        "status_ready": "Ready to process",
+        "status_running": "Processing...",
+        "status_done": "Completed successfully",
+        "status_error": "Error during execution",
+        "log_preset_dynamic": "Preset 'Dynamic' applied (tight, snappy cuts).",
+        "log_preset_narration": "Preset 'Narration' applied (natural breathing room).",
+        "log_tl_loaded": "Timeline loaded: {name} (media: {media})",
+        "log_tl_loaded_no_media": "Timeline loaded: {name} (select original input above).",
+        "log_tl_warn": "Warning inspecting timeline: {err}",
+        "log_tl_cleared": "Imported timeline cleared; auto-detection re-enabled.",
+        "log_no_out_dir": "No existing output folder to open yet.",
+        "dlg_warn_title": "Warning",
+        "dlg_err_title": "Error",
+        "dlg_warn_no_input": "Select an Original Input or import an FCPXML/EDL timeline.",
+        "dlg_err_in_not_found": "Input file not found:\n{path}",
+        "dlg_err_tl_not_found": "Timeline file not found:\n{path}",
+        "dlg_in_title": "Select original input file",
+        "dlg_out_file_title": "Set output file and folder",
+        "dlg_out_dir_title": "Choose output folder",
+        "dlg_tl_title": "Import FCPXML or EDL timeline",
+        "ft_media": "Videos & Audio",
+        "ft_all": "All files",
+        "ft_mp4": "MP4 Video",
+        "ft_fcpxml": "FCPXML Timeline",
+        "ft_edl": "EDL Timeline",
+        "ft_timelines": "Timelines (FCPXML / EDL)",
+        "pipe_import": "1/3 Importing cuts from {name}...",
+        "pipe_imported_info": "    Media: {media} | Imported clips: {count} | Cut duration: {dur}",
+        "pipe_scope_preview": "first {sec}s",
+        "pipe_scope_full": "full video",
+        "pipe_scope_tl": "imported timeline ({count} clips)",
+        "pipe_analyzing": "1/3 Analyzing silences ({scope}) in: {name}...",
+        "pipe_no_speech": "No speech segments detected in this range. Try lowering the dB threshold (e.g., -38 dB).",
+        "pipe_analyzed_info": "    Analyzed: {orig} -> Cut: {cut} (-{saved:.2f}s removed | {count} clips)",
+        "pipe_dest": "    Destination: {dest}.*",
+        "pipe_fcpxml_saved": "2/3 FCPXML saved: {name}",
+        "pipe_edl_saved": "2/3 EDL saved: {name}",
+        "pipe_jsonl_saved": "2/3 JSONL saved: {name}",
+        "pipe_tl_disabled": "2/3 Timeline export disabled.",
+        "pipe_rendering": "3/3 Rendering file ({scope}) -> {name}...",
+        "pipe_done": "    Completed: {path}",
+        "pipe_render_disabled": "3/3 Direct MP4 rendering disabled.",
+    },
+}
+
+THEMES: Dict[str, Dict[str, str]] = {
+    "dark": {
+        "bg": "#0f1115",
+        "card_bg": "#161920",
+        "card_border": "#262c3a",
+        "input_bg": "#0b0d11",
+        "btn_bg": "#222733",
+        "btn_hover": "#2e3546",
+        "fg": "#f1f5f9",
+        "muted": "#94a3b8",
+        "accent": "#3b82f6",
+        "accent_hover": "#2563eb",
+        "title_accent": "#60a5fa",
+        "badge_bg": "#1e2533",
+        "badge_fg": "#93c5fd",
+        "out_fg": "#6ee7b7",
+        "tl_fg": "#93c5fd",
+        "log_fg": "#cbd5e1",
+        "disabled_bg": "#1e293b",
+        "disabled_fg": "#64748b",
+    },
+    "light": {
+        "bg": "#f1f5f9",
+        "card_bg": "#ffffff",
+        "card_border": "#cbd5e1",
+        "input_bg": "#f8fafc",
+        "btn_bg": "#e2e8f0",
+        "btn_hover": "#cbd5e1",
+        "fg": "#0f172a",
+        "muted": "#475569",
+        "accent": "#2563eb",
+        "accent_hover": "#1d4ed8",
+        "title_accent": "#2563eb",
+        "badge_bg": "#dbeafe",
+        "badge_fg": "#1e40af",
+        "out_fg": "#047857",
+        "tl_fg": "#1d4ed8",
+        "log_fg": "#1e293b",
+        "disabled_bg": "#e2e8f0",
+        "disabled_fg": "#94a3b8",
+    },
+}
+
+SETTINGS_FILE = Path.home() / ".config" / "smartcut" / "settings.json"
+
+
+def load_settings() -> Dict[str, str]:
+    try:
+        if SETTINGS_FILE.is_file():
+            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            lang = data.get("lang", "pt_BR")
+            theme = data.get("theme", "dark")
+            return {
+                "lang": lang if lang in TRANSLATIONS else "pt_BR",
+                "theme": theme if theme in THEMES else "dark",
+            }
+    except Exception:
+        pass
+    return {"lang": "pt_BR", "theme": "dark"}
+
+
+def save_settings(lang: str, theme: str) -> None:
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(
+            json.dumps({"lang": lang, "theme": theme}, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def translate(lang: str, key: str, **kwargs) -> str:
+    catalog = TRANSLATIONS.get(lang, TRANSLATIONS["pt_BR"])
+    template = catalog.get(key, TRANSLATIONS["pt_BR"].get(key, key))
+    return template.format(**kwargs) if kwargs else template
+
+
+# ==============================================================================
+# NÚCLEO DE ANÁLISE E CORTE (FFMPEG / FFPROBE)
+# ==============================================================================
 
 @dataclass
 class Segment:
@@ -189,7 +444,7 @@ def _smpte_to_seconds(tc: str, fps: float) -> float:
     """Converte timecode SMPTE HH:MM:SS:FF (ou ;FF) para segundos."""
     parts = [int(x) for x in re.split(r"[:;]", tc.strip())]
     if len(parts) != 4:
-        raise ValueError(f"Timecode SMPTE inválido: {tc}")
+        raise ValueError(f"Invalid SMPTE timecode: {tc}")
     hours, mins, secs, frames = parts
     fps_int = max(1, int(round(fps)))
     total_frames = ((hours * 3600 + mins * 60 + secs) * fps_int) + frames
@@ -275,7 +530,7 @@ def import_edl(
             segments.append(Segment(start=src_in, end=src_out))
 
     if not segments:
-        raise ValueError(f"Nenhum corte válido encontrado no EDL: {edl_path.name}")
+        raise ValueError(f"No valid cuts found in EDL: {edl_path.name}")
 
     return segments, resolved_media
 
@@ -407,7 +662,7 @@ def import_fcpxml(
 
     spine = root.find(".//sequence/spine")
     if spine is None:
-        raise ValueError(f"Nenhuma <sequence><spine> encontrada em: {fcpxml_path.name}")
+        raise ValueError(f"No <sequence><spine> found in: {fcpxml_path.name}")
 
     segments: List[Segment] = []
     for node in spine:
@@ -426,7 +681,7 @@ def import_fcpxml(
         segments.append(Segment(start=clip_in, end=clip_in + clip_dur))
 
     if not segments:
-        raise ValueError(f"Nenhum clipe válido encontrado no FCPXML: {fcpxml_path.name}")
+        raise ValueError(f"No valid clips found in FCPXML: {fcpxml_path.name}")
 
     return segments, resolved_media
 
@@ -459,7 +714,7 @@ def render_cut_video(
     info: MediaInfo,
 ) -> Path:
     if not keep_segments:
-        raise ValueError("Nenhum segmento com fala para renderizar.")
+        raise ValueError("No speech segments to render.")
 
     filter_lines: List[str] = []
     concat_inputs: List[str] = []
@@ -533,10 +788,7 @@ def resolve_output_base(
     suffix_tag: str,
     output_target: Optional[Path] = None,
 ) -> Tuple[Path, str]:
-    """
-    Resolve a pasta de destino e o nome base (stem) para todos os arquivos gerados.
-    Aceita tanto um diretório quanto um caminho de arquivo com ou sem extensão.
-    """
+    """Resolve a pasta de destino e o nome base (stem) para todos os arquivos gerados."""
     if output_target is None:
         return media_path.parent, f"{media_path.stem}{suffix_tag}"
 
@@ -573,17 +825,18 @@ def run_pipeline(
     mp4_out: Optional[Path] = None,
     do_export_jsonl: bool = False,
     jsonl_out: Optional[Path] = None,
+    lang: str = "pt_BR",
     log: Callable[[str], None] = print,
 ) -> Optional[Path]:
+    tr = lambda k, **kw: translate(lang, k, **kw)
     keep_segments: List[Segment] = []
 
-    # 1. Obter cortes (via importação FCPXML/EDL ou detecção automática de silêncio)
     if import_timeline is not None:
         if not import_timeline.exists():
-            raise FileNotFoundError(f"Timeline não encontrada: {import_timeline}")
+            raise FileNotFoundError(f"Timeline not found: {import_timeline}")
 
         ext = import_timeline.suffix.lower()
-        log(f"1/3 Importando cortes de {import_timeline.name}...")
+        log(tr("pipe_import", name=import_timeline.name))
         if ext in (".fcpxml", ".xml"):
             keep_segments, resolved_media = import_fcpxml(
                 import_timeline, fallback_media=media_path
@@ -593,93 +846,103 @@ def run_pipeline(
                 import_timeline, fallback_media=media_path
             )
         else:
-            raise ValueError(f"Formato de timeline não suportado: {ext} (use .fcpxml ou .edl)")
+            raise ValueError(f"Unsupported timeline format: {ext} (use .fcpxml or .edl)")
 
         if media_path is None or not media_path.exists():
             media_path = resolved_media
 
         if media_path is None or not media_path.exists():
             raise FileNotFoundError(
-                "Não foi possível localizar o arquivo de vídeo/áudio referenciado pela timeline. "
-                "Selecione a mídia manualmente no campo 'Entrada Original'."
+                "Could not locate the media file referenced by the timeline."
             )
 
         info = probe_media_info(media_path)
         suffix_tag = "_imported"
-        scope_tag = f"timeline importada ({len(keep_segments)} clipes)"
+        scope_tag = tr("pipe_scope_tl", count=len(keep_segments))
         final_dur = sum(s.duration for s in keep_segments)
         log(
-            f"    Mídia: {media_path.name} | Clipes importados: {len(keep_segments)} "
-            f"| Duração cortada: {format_ts(final_dur)}"
+            tr(
+                "pipe_imported_info",
+                media=media_path.name,
+                count=len(keep_segments),
+                dur=format_ts(final_dur),
+            )
         )
     else:
         if media_path is None or not media_path.exists():
-            raise FileNotFoundError(f"Arquivo de entrada não encontrado: {media_path}")
+            raise FileNotFoundError(f"Input file not found: {media_path}")
 
         info = probe_media_info(media_path)
         effective_dur = min(info.duration, max_duration) if max_duration is not None else info.duration
-        scope_tag = f"primeiros {int(effective_dur)}s" if max_duration is not None else "vídeo completo"
+        scope_tag = (
+            tr("pipe_scope_preview", sec=int(effective_dur))
+            if max_duration is not None
+            else tr("pipe_scope_full")
+        )
         suffix_tag = f"_preview{int(max_duration)}s" if max_duration is not None else "_smartcut"
 
-        log(f"1/3 Analisando silêncios ({scope_tag}) em: {media_path.name}...")
+        log(tr("pipe_analyzing", scope=scope_tag, name=media_path.name))
         silences = detect_silences(media_path, threshold_db, min_silence, max_duration=max_duration)
         keep_segments = compute_speech_segments(
             silences, effective_dur, padding, min_clip, merge_gap
         )
 
         if not keep_segments:
-            log("Nenhum trecho com fala detectado nesse intervalo. Tente diminuir o limiar de dB (ex.: -38 dB).")
+            log(tr("pipe_no_speech"))
             return None
 
         final_dur = sum(s.duration for s in keep_segments)
         saved = effective_dur - final_dur
         log(
-            f"    Analisado: {format_ts(effective_dur)} -> Cortado: {format_ts(final_dur)} "
-            f"(-{saved:.2f}s removidos | {len(keep_segments)} clipes)"
+            tr(
+                "pipe_analyzed_info",
+                orig=format_ts(effective_dur),
+                cut=format_ts(final_dur),
+                saved=saved,
+                count=len(keep_segments),
+            )
         )
 
     out_dir, out_stem = resolve_output_base(media_path, suffix_tag, output_target)
     out_dir.mkdir(parents=True, exist_ok=True)
-    log(f"    Destino: {out_dir / out_stem}.*")
+    log(tr("pipe_dest", dest=out_dir / out_stem))
 
-    # 2. Exportação de timelines FCPXML / EDL / JSONL
     if do_export_fcpxml:
         out_fcpxml = fcpxml_out or (out_dir / f"{out_stem}.fcpxml")
         export_fcpxml(media_path, keep_segments, out_fcpxml, info)
-        log(f"2/3 FCPXML salvo: {out_fcpxml.name}")
+        log(tr("pipe_fcpxml_saved", name=out_fcpxml.name))
 
     if do_export_edl:
         out_edl = edl_out or (out_dir / f"{out_stem}.edl")
         export_edl(media_path, keep_segments, out_edl, info)
-        log(f"2/3 EDL salvo: {out_edl.name}")
+        log(tr("pipe_edl_saved", name=out_edl.name))
 
     if do_export_jsonl or jsonl_out:
         out_jsonl = jsonl_out or (out_dir / f"{out_stem}.jsonl")
         export_jsonl(media_path, keep_segments, out_jsonl)
-        log(f"2/3 JSONL salvo: {out_jsonl.name}")
+        log(tr("pipe_jsonl_saved", name=out_jsonl.name))
 
     if not (do_export_fcpxml or do_export_edl or do_export_jsonl or jsonl_out):
-        log("2/3 Exportação de timelines desativada.")
+        log(tr("pipe_tl_disabled"))
 
-    # 3. Renderização MP4
     if render_mp4:
         out_video = mp4_out or (out_dir / f"{out_stem}.mp4")
-        log(f"3/3 Renderizando arquivo ({scope_tag}) -> {out_video.name}...")
+        log(tr("pipe_rendering", scope=scope_tag, name=out_video.name))
         final_media = render_cut_video(
             media_path=media_path,
             keep_segments=keep_segments,
             output_path=out_video,
             info=info,
         )
-        log(f"    Concluído: {final_media}")
+        log(tr("pipe_done", path=final_media))
     else:
-        log("3/3 Renderização direta de MP4 desativada.")
+        log(tr("pipe_render_disabled"))
 
     return out_dir
 
 
 # ==============================================================================
-# INTERFACE GRÁFICA MODERNIZADA (TKINTER)
+# INTERFACE GRÁFICA (TKINTER - PT-BR / EN-US & TEMAS CLARO / ESCURO)
 # ==============================================================================
 
 def launch_gui() -> None:
@@ -688,41 +951,49 @@ def launch_gui() -> None:
         from tkinter import filedialog, messagebox, scrolledtext, ttk
     except ImportError:
         print(
-            "Erro: Tkinter não está instalado neste Python.\n"
-            "No Debian/Ubuntu/Linux Mint: sudo apt install python3-tk\n"
-            "No Arch/Manjaro/BigLinux:     sudo pacman -S tk"
+            "Erro / Error: Tkinter não está instalado / Tkinter is not installed.\n"
+            "Debian/Ubuntu/Mint: sudo apt install python3-tk\n"
+            "Arch/Manjaro/BigLinux: sudo pacman -S tk"
         )
         sys.exit(1)
 
     class SmartCutApp:
         def __init__(self, root: tk.Tk):
             self.root = root
-            self.root.title("SmartCut — Corte Inteligente de Silêncios")
-            self.root.geometry("760x760")
-            self.root.minsize(680, 680)
+            prefs = load_settings()
+            self.lang: str = prefs["lang"]
+            self.theme_name: str = prefs["theme"]
 
-            # Paleta moderna escura (Slate / Obsidian)
-            self.bg = "#0f1115"
-            self.card_bg = "#161920"
-            self.card_border = "#252a36"
-            self.input_bg = "#0b0d11"
-            self.btn_bg = "#222733"
-            self.btn_hover = "#2d3444"
-            self.fg = "#f1f5f9"
-            self.muted = "#94a3b8"
-            self.accent = "#3b82f6"
-            self.accent_hover = "#2563eb"
-            self.success = "#10b981"
+            self._i18n_bindings: List[Tuple[str, tk.StringVar]] = []
+            self._card_frames: List[tk.Frame] = []
+            self._card_headers: List[tk.Frame] = []
+            self._card_titles: List[tk.Label] = []
+            self._row_frames: List[tk.Frame] = []
+            self._bold_labels: List[tk.Label] = []
+            self._muted_labels: List[tk.Label] = []
+            self._slider_val_labels: List[ttk.Label] = []
+            self._entry_wrappers: List[tk.Frame] = []
+            self._entries_default: List[tk.Entry] = []
 
-            self.root.configure(bg=self.bg)
-            self._setup_styles(ttk)
+            self._last_media_info: Optional[MediaInfo] = None
+            self._last_media_name: Optional[str] = None
+            self._status_key: str = "status_ready"
 
-            # Estado da interface
+            self.root.title(self.tr("window_title"))
+            self.root.geometry("800x770")
+            self.root.minsize(710, 690)
+
+            self.style = ttk.Style()
+            if "clam" in self.style.theme_names():
+                self.style.theme_use("clam")
+
+            # Variáveis de controle
+            self.lang_display_var = tk.StringVar(value=LANG_LABELS[self.lang])
             self.media_var = tk.StringVar()
             self.output_var = tk.StringVar()
             self.import_tl_var = tk.StringVar()
-            self.media_badge_var = tk.StringVar(value="Nenhum arquivo selecionado")
-            self.status_var = tk.StringVar(value="Pronto para processar")
+            self.media_badge_var = tk.StringVar(value=self.tr("no_file"))
+            self.status_var = tk.StringVar(value=self.tr(self._status_key))
             self._output_manually_edited = False
             self._last_output_dir: Optional[Path] = None
 
@@ -738,134 +1009,68 @@ def launch_gui() -> None:
             self.export_jsonl_var = tk.BooleanVar(value=False)
 
             self._build_ui(tk, ttk, scrolledtext)
+            self.apply_theme(self.theme_name)
 
-        def _setup_styles(self, ttk) -> None:
-            style = ttk.Style()
-            if "clam" in style.theme_names():
-                style.theme_use("clam")
+        def tr(self, key: str, **kwargs) -> str:
+            return translate(self.lang, key, **kwargs)
 
-            style.configure("TFrame", background=self.bg)
-            style.configure("Card.TFrame", background=self.card_bg)
-            style.configure("TLabel", background=self.card_bg, foreground=self.fg, font=("sans-serif", 9))
-            style.configure("Muted.TLabel", background=self.card_bg, foreground=self.muted, font=("sans-serif", 8))
-            style.configure("Header.TLabel", background=self.bg, foreground=self.fg, font=("sans-serif", 15, "bold"))
-            style.configure("Sub.TLabel", background=self.bg, foreground=self.muted, font=("sans-serif", 9))
+        def _tvar(self, tk, key: str) -> tk.StringVar:
+            var = tk.StringVar(value=self.tr(key))
+            self._i18n_bindings.append((key, var))
+            return var
 
-            style.configure(
-                "TCheckbutton",
-                background=self.card_bg,
-                foreground=self.fg,
-                font=("sans-serif", 9),
-                focuscolor=self.card_bg,
-            )
-            style.map("TCheckbutton", background=[("active", self.card_bg)])
-
-            style.configure(
-                "TRadiobutton",
-                background=self.card_bg,
-                foreground=self.fg,
-                font=("sans-serif", 9, "bold"),
-                focuscolor=self.card_bg,
-            )
-            style.map("TRadiobutton", background=[("active", self.card_bg)])
-
-            style.configure(
-                "Horizontal.TScale",
-                background=self.card_bg,
-                troughcolor=self.input_bg,
-            )
-
-            style.configure(
-                "Horizontal.TProgressbar",
-                troughcolor=self.input_bg,
-                background=self.accent,
-                bordercolor=self.card_border,
-                lightcolor=self.accent,
-                darkcolor=self.accent,
-            )
-
-            style.configure(
-                "Accent.TButton",
-                background=self.accent,
-                foreground="#ffffff",
-                font=("sans-serif", 10, "bold"),
-                borderwidth=0,
-                padding=(16, 10),
-            )
-            style.map(
-                "Accent.TButton",
-                background=[("active", self.accent_hover), ("disabled", "#1e293b")],
-                foreground=[("disabled", "#64748b")],
-            )
-
-            style.configure(
-                "Secondary.TButton",
-                background=self.btn_bg,
-                foreground=self.fg,
-                font=("sans-serif", 9),
-                borderwidth=0,
-                padding=(12, 6),
-            )
-            style.map(
-                "Secondary.TButton",
-                background=[("active", self.btn_hover), ("disabled", "#181b22")],
-                foreground=[("disabled", "#475569")],
-            )
-
-        def _make_card(self, tk, parent, title: str, right_widget_fn=None):
-            outer = tk.Frame(
-                parent,
-                bg=self.card_bg,
-                highlightbackground=self.card_border,
-                highlightthickness=1,
-                padx=14,
-                pady=11,
-            )
+        def _make_card(self, tk, parent, title_key: str, right_widget_fn=None) -> tk.Frame:
+            outer = tk.Frame(parent, highlightthickness=1, padx=14, pady=11)
             outer.pack(fill=tk.X, pady=(0, 10))
+            self._card_frames.append(outer)
 
-            header = tk.Frame(outer, bg=self.card_bg)
+            header = tk.Frame(outer)
             header.pack(fill=tk.X, pady=(0, 8))
+            self._card_headers.append(header)
 
-            tk.Label(
+            title_lbl = tk.Label(
                 header,
-                text=title.upper(),
-                bg=self.card_bg,
-                fg="#60a5fa",
-                font=("sans-serif", 8, "bold"),
-            ).pack(side=tk.LEFT)
+                textvariable=self._tvar(tk, title_key),
+                font=("sans-serif", 9, "bold"),
+            )
+            title_lbl.pack(side=tk.LEFT)
+            self._card_titles.append(title_lbl)
 
             if right_widget_fn:
                 right_widget_fn(header)
 
             return outer
 
-        def _make_entry(self, tk, parent, textvariable, fg_color=None) -> tk.Entry:
-            wrapper = tk.Frame(
-                parent,
-                bg=self.input_bg,
-                highlightbackground=self.card_border,
-                highlightthickness=1,
-            )
+        def _make_entry(self, tk, parent, textvariable, role: str = "default") -> tk.Entry:
+            wrapper = tk.Frame(parent, highlightthickness=1)
             wrapper.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+            self._entry_wrappers.append(wrapper)
 
             entry = tk.Entry(
                 wrapper,
                 textvariable=textvariable,
-                bg=self.input_bg,
-                fg=fg_color or self.fg,
-                insertbackground=self.fg,
                 relief=tk.FLAT,
                 font=("sans-serif", 9),
             )
             entry.pack(fill=tk.X, padx=8, pady=5)
+
+            if role == "output":
+                self.output_entry = entry
+            elif role == "timeline":
+                self.tl_entry = entry
+            else:
+                self._entries_default.append(entry)
+
             return entry
 
         def _build_ui(self, tk, ttk, scrolledtext) -> None:
-            main = ttk.Frame(self.root, padding=16)
-            main.pack(fill=tk.BOTH, expand=True)
+            self.main_frame = ttk.Frame(self.root, padding=16)
+            self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-            # Cabeçalho Superior
-            top_bar = ttk.Frame(main)
+            # ------------------------------------------------------------------
+            # Barra Superior: Título + Seletor de Idioma + Alternador de Tema
+            # ------------------------------------------------------------------
+            top_bar = ttk.Frame(self.main_frame)
             top_bar.pack(fill=tk.X, pady=(0, 12))
 
             title_box = ttk.Frame(top_bar)
@@ -873,119 +1078,212 @@ def launch_gui() -> None:
             ttk.Label(title_box, text="SmartCut", style="Header.TLabel").pack(anchor=tk.W)
             ttk.Label(
                 title_box,
-                text="Remoção inteligente de silêncios, intercâmbio FCPXML / EDL e renderização",
+                textvariable=self._tvar(tk, "subtitle"),
                 style="Sub.TLabel",
             ).pack(anchor=tk.W)
 
-            preset_box = ttk.Frame(top_bar)
-            preset_box.pack(side=tk.RIGHT, anchor=tk.CENTER)
-            ttk.Button(
-                preset_box,
-                text="Preset: Dinâmico",
-                style="Secondary.TButton",
-                command=lambda: self.apply_preset("dynamic"),
-            ).pack(side=tk.LEFT, padx=(0, 6))
-            ttk.Button(
-                preset_box,
-                text="Preset: Narração",
-                style="Secondary.TButton",
-                command=lambda: self.apply_preset("narration"),
-            ).pack(side=tk.LEFT)
+            controls_box = ttk.Frame(top_bar)
+            controls_box.pack(side=tk.RIGHT, anchor=tk.CENTER)
 
-            # 1. Cartão: Entrada Original e Saída do Arquivo
+            # Idioma
+            ttk.Label(
+                controls_box,
+                textvariable=self._tvar(tk, "lbl_lang"),
+                style="Sub.TLabel",
+            ).pack(side=tk.LEFT, padx=(0, 5))
+
+            self.lang_combo = ttk.Combobox(
+                controls_box,
+                textvariable=self.lang_display_var,
+                values=list(LANG_LABELS.values()),
+                state="readonly",
+                width=15,
+                font=("sans-serif", 9),
+            )
+            self.lang_combo.pack(side=tk.LEFT, padx=(0, 12))
+            self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
+
+            # Seletor de Tema (Escuro / Claro)
+            self.dark_btn = ttk.Button(
+                controls_box,
+                textvariable=self._tvar(tk, "theme_dark"),
+                command=lambda: self.set_theme("dark"),
+            )
+            self.dark_btn.pack(side=tk.LEFT, padx=(0, 3))
+
+            self.light_btn = ttk.Button(
+                controls_box,
+                textvariable=self._tvar(tk, "theme_light"),
+                command=lambda: self.set_theme("light"),
+            )
+            self.light_btn.pack(side=tk.LEFT)
+
+            # ------------------------------------------------------------------
+            # 1. Cartão: Entrada Original & Saída do Arquivo
+            # ------------------------------------------------------------------
             def add_media_badge(hdr):
-                tk.Label(
+                self.badge_label = tk.Label(
                     hdr,
                     textvariable=self.media_badge_var,
-                    bg="#1e2430",
-                    fg="#93c5fd",
-                    font=("sans-serif", 8),
-                    padx=8,
+                    font=("sans-serif", 8, "bold"),
+                    padx=9,
                     pady=2,
-                ).pack(side=tk.RIGHT)
+                )
+                self.badge_label.pack(side=tk.RIGHT)
 
-            io_card = self._make_card(tk, main, "1. Entrada Original & Saída do Arquivo", add_media_badge)
+            io_card = self._make_card(tk, self.main_frame, "card_io", add_media_badge)
 
-            # Linha Entrada Original
-            in_row = tk.Frame(io_card, bg=self.card_bg)
+            # Entrada Original
+            in_row = tk.Frame(io_card)
             in_row.pack(fill=tk.X, pady=(0, 8))
-            tk.Label(
-                in_row, text="Entrada Original:", width=14, anchor=tk.W,
-                bg=self.card_bg, fg=self.fg, font=("sans-serif", 9, "bold"),
-            ).pack(side=tk.LEFT)
-            self._make_entry(tk, in_row, self.media_var)
+            self._row_frames.append(in_row)
+
+            lbl_in = tk.Label(
+                in_row,
+                textvariable=self._tvar(tk, "lbl_input"),
+                width=15,
+                anchor=tk.W,
+                font=("sans-serif", 9, "bold"),
+            )
+            lbl_in.pack(side=tk.LEFT)
+            self._bold_labels.append(lbl_in)
+
+            self._make_entry(tk, in_row, self.media_var, role="default")
             ttk.Button(
-                in_row, text="Escolher Entrada...", style="Secondary.TButton", command=self.browse_input
+                in_row,
+                textvariable=self._tvar(tk, "btn_browse_in"),
+                style="Secondary.TButton",
+                command=self.browse_input,
             ).pack(side=tk.RIGHT)
 
-            # Linha Saída do Arquivo
-            out_row = tk.Frame(io_card, bg=self.card_bg)
+            # Saída do Arquivo
+            out_row = tk.Frame(io_card)
             out_row.pack(fill=tk.X, pady=(0, 8))
-            tk.Label(
-                out_row, text="Saída do Arquivo:", width=14, anchor=tk.W,
-                bg=self.card_bg, fg=self.fg, font=("sans-serif", 9, "bold"),
-            ).pack(side=tk.LEFT)
-            out_entry = self._make_entry(tk, out_row, self.output_var, fg_color="#6ee7b7")
+            self._row_frames.append(out_row)
+
+            lbl_out = tk.Label(
+                out_row,
+                textvariable=self._tvar(tk, "lbl_output"),
+                width=15,
+                anchor=tk.W,
+                font=("sans-serif", 9, "bold"),
+            )
+            lbl_out.pack(side=tk.LEFT)
+            self._bold_labels.append(lbl_out)
+
+            out_entry = self._make_entry(tk, out_row, self.output_var, role="output")
             out_entry.bind("<KeyRelease>", self._on_manual_output_edit)
 
             ttk.Button(
-                out_row, text="Pasta...", style="Secondary.TButton", command=self.browse_output_dir
+                out_row,
+                textvariable=self._tvar(tk, "btn_folder"),
+                style="Secondary.TButton",
+                command=self.browse_output_dir,
             ).pack(side=tk.RIGHT, padx=(4, 0))
             ttk.Button(
-                out_row, text="Salvar Como...", style="Secondary.TButton", command=self.browse_output_file
+                out_row,
+                textvariable=self._tvar(tk, "btn_save_as"),
+                style="Secondary.TButton",
+                command=self.browse_output_file,
             ).pack(side=tk.RIGHT)
 
-            # Linha Opcional: Importar Timeline Existente (FCPXML / EDL)
-            tl_row = tk.Frame(io_card, bg=self.card_bg)
+            # Timeline Opcional
+            tl_row = tk.Frame(io_card)
             tl_row.pack(fill=tk.X)
-            tk.Label(
-                tl_row, text="Timeline (Opc.):", width=14, anchor=tk.W,
-                bg=self.card_bg, fg=self.muted, font=("sans-serif", 9),
-            ).pack(side=tk.LEFT)
-            self._make_entry(tk, tl_row, self.import_tl_var, fg_color="#93c5fd")
+            self._row_frames.append(tl_row)
+
+            lbl_tl = tk.Label(
+                tl_row,
+                textvariable=self._tvar(tk, "lbl_timeline"),
+                width=15,
+                anchor=tk.W,
+                font=("sans-serif", 9),
+            )
+            lbl_tl.pack(side=tk.LEFT)
+            self._muted_labels.append(lbl_tl)
+
+            self._make_entry(tk, tl_row, self.import_tl_var, role="timeline")
             ttk.Button(
-                tl_row, text="Limpar", style="Secondary.TButton", command=self.clear_timeline
+                tl_row,
+                textvariable=self._tvar(tk, "btn_clear"),
+                style="Secondary.TButton",
+                command=self.clear_timeline,
             ).pack(side=tk.RIGHT, padx=(4, 0))
             ttk.Button(
-                tl_row, text="Importar FCPXML / EDL...", style="Secondary.TButton", command=self.browse_timeline
+                tl_row,
+                textvariable=self._tvar(tk, "btn_import_tl"),
+                style="Secondary.TButton",
+                command=self.browse_timeline,
             ).pack(side=tk.RIGHT)
 
-            # 2. Cartão: Parâmetros de Detecção de Silêncio (em grid 2x2)
-            cut_card = self._make_card(tk, main, "2. Parâmetros de Corte Automático")
-            grid_box = tk.Frame(cut_card, bg=self.card_bg)
+            # ------------------------------------------------------------------
+            # 2. Cartão: Parâmetros de Corte Automático + Presets
+            # ------------------------------------------------------------------
+            def add_presets(hdr):
+                p_box = tk.Frame(hdr)
+                p_box.pack(side=tk.RIGHT)
+                self._card_headers.append(p_box)
+
+                ttk.Button(
+                    p_box,
+                    textvariable=self._tvar(tk, "preset_dynamic"),
+                    style="Mini.TButton",
+                    command=lambda: self.apply_preset("dynamic"),
+                ).pack(side=tk.LEFT, padx=(0, 6))
+                ttk.Button(
+                    p_box,
+                    textvariable=self._tvar(tk, "preset_narration"),
+                    style="Mini.TButton",
+                    command=lambda: self.apply_preset("narration"),
+                ).pack(side=tk.LEFT)
+
+            cut_card = self._make_card(tk, self.main_frame, "card_params", add_presets)
+            grid_box = tk.Frame(cut_card)
             grid_box.pack(fill=tk.X)
             grid_box.columnconfigure(0, weight=1)
             grid_box.columnconfigure(1, weight=1)
+            self._row_frames.append(grid_box)
 
-            c00 = tk.Frame(grid_box, bg=self.card_bg)
+            c00 = tk.Frame(grid_box)
             c00.grid(row=0, column=0, sticky="ew", padx=(0, 12), pady=(0, 6))
-            self._add_slider(c00, ttk, "Limiar de Silêncio (dB):", self.threshold_var, -60.0, -10.0, "{:.1f} dB")
+            self._row_frames.append(c00)
+            self._add_slider(tk, c00, ttk, "slider_threshold", self.threshold_var, -60.0, -10.0, "{:.1f} dB")
 
-            c01 = tk.Frame(grid_box, bg=self.card_bg)
+            c01 = tk.Frame(grid_box)
             c01.grid(row=0, column=1, sticky="ew", padx=(12, 0), pady=(0, 6))
-            self._add_slider(c01, ttk, "Silêncio Mínimo (s):", self.min_silence_var, 0.15, 2.00, "{:.2f} s")
+            self._row_frames.append(c01)
+            self._add_slider(tk, c01, ttk, "slider_min_silence", self.min_silence_var, 0.15, 2.00, "{:.2f} s")
 
-            c10 = tk.Frame(grid_box, bg=self.card_bg)
+            c10 = tk.Frame(grid_box)
             c10.grid(row=1, column=0, sticky="ew", padx=(0, 12))
-            self._add_slider(c10, ttk, "Margem / Padding (s):", self.padding_var, 0.00, 0.50, "{:.2f} s")
+            self._row_frames.append(c10)
+            self._add_slider(tk, c10, ttk, "slider_padding", self.padding_var, 0.00, 0.50, "{:.2f} s")
 
-            c11 = tk.Frame(grid_box, bg=self.card_bg)
+            c11 = tk.Frame(grid_box)
             c11.grid(row=1, column=1, sticky="ew", padx=(12, 0))
-            self._add_slider(c11, ttk, "Fusão de Cortes (s):", self.merge_gap_var, 0.00, 0.50, "{:.2f} s")
+            self._row_frames.append(c11)
+            self._add_slider(tk, c11, ttk, "slider_merge_gap", self.merge_gap_var, 0.00, 0.50, "{:.2f} s")
 
-            # 3. Cartão: Escopo e Formatos de Saída
-            out_card = self._make_card(tk, main, "3. Duração & Formatos Exportados")
+            # ------------------------------------------------------------------
+            # 3. Cartão: Duração & Formatos Exportados
+            # ------------------------------------------------------------------
+            out_card = self._make_card(tk, self.main_frame, "card_export")
 
-            scope_row = tk.Frame(out_card, bg=self.card_bg)
+            scope_row = tk.Frame(out_card)
             scope_row.pack(fill=tk.X, pady=(0, 8))
+            self._row_frames.append(scope_row)
 
-            tk.Label(
-                scope_row, text="Escopo:", bg=self.card_bg, fg=self.muted, font=("sans-serif", 9)
-            ).pack(side=tk.LEFT, padx=(0, 12))
+            lbl_scope = tk.Label(
+                scope_row,
+                textvariable=self._tvar(tk, "lbl_scope"),
+                font=("sans-serif", 9),
+            )
+            lbl_scope.pack(side=tk.LEFT, padx=(0, 12))
+            self._muted_labels.append(lbl_scope)
 
             ttk.Radiobutton(
                 scope_row,
-                text="Apenas 30s (Prévia rápida)",
+                textvariable=self._tvar(tk, "radio_30s"),
                 value="30s",
                 variable=self.scope_var,
                 command=self._on_scope_changed,
@@ -993,38 +1291,49 @@ def launch_gui() -> None:
 
             ttk.Radiobutton(
                 scope_row,
-                text="Vídeo todo",
+                textvariable=self._tvar(tk, "radio_full"),
                 value="full",
                 variable=self.scope_var,
                 command=self._on_scope_changed,
             ).pack(side=tk.LEFT)
 
-            formats_row = tk.Frame(out_card, bg=self.card_bg)
+            formats_row = tk.Frame(out_card)
             formats_row.pack(fill=tk.X)
+            self._row_frames.append(formats_row)
 
             ttk.Checkbutton(
-                formats_row, text="Renderizar MP4 (.mp4)", variable=self.render_mp4_var
+                formats_row,
+                textvariable=self._tvar(tk, "chk_mp4"),
+                variable=self.render_mp4_var,
             ).pack(side=tk.LEFT, padx=(0, 14))
 
             ttk.Checkbutton(
-                formats_row, text="Timeline FCPXML (.fcpxml)", variable=self.export_fcpxml_var
+                formats_row,
+                textvariable=self._tvar(tk, "chk_fcpxml"),
+                variable=self.export_fcpxml_var,
             ).pack(side=tk.LEFT, padx=(0, 14))
 
             ttk.Checkbutton(
-                formats_row, text="Timeline EDL (.edl)", variable=self.export_edl_var
+                formats_row,
+                textvariable=self._tvar(tk, "chk_edl"),
+                variable=self.export_edl_var,
             ).pack(side=tk.LEFT, padx=(0, 14))
 
             ttk.Checkbutton(
-                formats_row, text="Lista JSONL (.jsonl)", variable=self.export_jsonl_var
+                formats_row,
+                textvariable=self._tvar(tk, "chk_jsonl"),
+                variable=self.export_jsonl_var,
             ).pack(side=tk.LEFT)
 
+            # ------------------------------------------------------------------
             # Barra de Ação Principal
-            action_row = ttk.Frame(main)
+            # ------------------------------------------------------------------
+            action_row = ttk.Frame(self.main_frame)
             action_row.pack(fill=tk.X, pady=(2, 8))
 
             self.run_btn = ttk.Button(
                 action_row,
-                text="Executar Prévia (Primeiros 30s)",
+                text=self.tr("btn_run_30s"),
                 style="Accent.TButton",
                 command=self.start_processing,
             )
@@ -1032,40 +1341,45 @@ def launch_gui() -> None:
 
             self.open_dir_btn = ttk.Button(
                 action_row,
-                text="Abrir Pasta de Saída",
+                textvariable=self._tvar(tk, "btn_open_dir"),
                 style="Secondary.TButton",
                 command=self.open_output_folder,
             )
             self.open_dir_btn.pack(side=tk.RIGHT, fill=tk.Y)
 
-            self.progress = ttk.Progressbar(main, mode="indeterminate")
+            self.progress = ttk.Progressbar(self.main_frame, mode="indeterminate")
             self.progress.pack(fill=tk.X, pady=(0, 8))
 
-            # Console de Saída
-            log_card = tk.Frame(
-                main,
-                bg=self.card_bg,
-                highlightbackground=self.card_border,
-                highlightthickness=1,
-                padx=10,
-                pady=8,
-            )
-            log_card.pack(fill=tk.BOTH, expand=True)
+            # ------------------------------------------------------------------
+            # Console de Log
+            # ------------------------------------------------------------------
+            self.log_card = tk.Frame(self.main_frame, highlightthickness=1, padx=10, pady=8)
+            self.log_card.pack(fill=tk.BOTH, expand=True)
+            self._card_frames.append(self.log_card)
 
-            log_hdr = tk.Frame(log_card, bg=self.card_bg)
+            log_hdr = tk.Frame(self.log_card)
             log_hdr.pack(fill=tk.X, pady=(0, 4))
-            tk.Label(
-                log_hdr, text="LOG DE EXECUÇÃO", bg=self.card_bg, fg="#60a5fa", font=("sans-serif", 8, "bold")
-            ).pack(side=tk.LEFT)
-            tk.Label(
-                log_hdr, textvariable=self.status_var, bg=self.card_bg, fg=self.muted, font=("sans-serif", 8)
-            ).pack(side=tk.RIGHT)
+            self._card_headers.append(log_hdr)
+
+            log_title = tk.Label(
+                log_hdr,
+                textvariable=self._tvar(tk, "card_log"),
+                font=("sans-serif", 9, "bold"),
+            )
+            log_title.pack(side=tk.LEFT)
+            self._card_titles.append(log_title)
+
+            self.status_lbl = tk.Label(
+                log_hdr,
+                textvariable=self.status_var,
+                font=("sans-serif", 8),
+            )
+            self.status_lbl.pack(side=tk.RIGHT)
+            self._muted_labels.append(self.status_lbl)
 
             self.log_box = scrolledtext.ScrolledText(
-                log_card,
+                self.log_card,
                 height=7,
-                bg=self.input_bg,
-                fg="#cbd5e1",
                 font=("monospace", 9),
                 relief=tk.FLAT,
                 state=tk.DISABLED,
@@ -1073,14 +1387,15 @@ def launch_gui() -> None:
             self.log_box.pack(fill=tk.BOTH, expand=True)
 
         def _add_slider(
-            self, parent, ttk, label_text: str, variable, from_: float, to: float, fmt: str
+            self, tk, parent, ttk, label_key: str, variable, from_: float, to: float, fmt: str
         ) -> None:
             top = ttk.Frame(parent, style="Card.TFrame")
             top.pack(fill=tk.X)
-            ttk.Label(top, text=label_text).pack(side=tk.LEFT)
+            ttk.Label(top, textvariable=self._tvar(tk, label_key)).pack(side=tk.LEFT)
 
-            val_label = ttk.Label(top, text=fmt.format(variable.get()), foreground="#60a5fa")
+            val_label = ttk.Label(top, text=fmt.format(variable.get()), style="SliderVal.TLabel")
             val_label.pack(side=tk.RIGHT)
+            self._slider_val_labels.append(val_label)
 
             def on_slide(raw_val: str) -> None:
                 rv = round(float(raw_val), 2)
@@ -1091,6 +1406,215 @@ def launch_gui() -> None:
             scale.pack(fill=tk.X, pady=(2, 0))
 
             variable.trace_add("write", lambda *_: val_label.config(text=fmt.format(variable.get())))
+
+        # ----------------------------------------------------------------------
+        # Controle de Tema e Idioma
+        # ----------------------------------------------------------------------
+
+        def set_theme(self, theme_name: str) -> None:
+            if theme_name not in THEMES:
+                return
+            self.theme_name = theme_name
+            self.apply_theme(theme_name)
+            save_settings(self.lang, self.theme_name)
+
+        def apply_theme(self, theme_name: str) -> None:
+            t = THEMES[theme_name]
+            self.root.configure(bg=t["bg"])
+
+            self.style.configure("TFrame", background=t["bg"])
+            self.style.configure("Card.TFrame", background=t["card_bg"])
+            self.style.configure("TLabel", background=t["card_bg"], foreground=t["fg"], font=("sans-serif", 9))
+            self.style.configure("SliderVal.TLabel", background=t["card_bg"], foreground=t["title_accent"], font=("sans-serif", 9, "bold"))
+            self.style.configure("Header.TLabel", background=t["bg"], foreground=t["fg"], font=("sans-serif", 15, "bold"))
+            self.style.configure("Sub.TLabel", background=t["bg"], foreground=t["muted"], font=("sans-serif", 9))
+
+            self.style.configure(
+                "TCheckbutton",
+                background=t["card_bg"],
+                foreground=t["fg"],
+                font=("sans-serif", 9),
+                focuscolor=t["card_bg"],
+            )
+            self.style.map("TCheckbutton", background=[("active", t["card_bg"])])
+
+            self.style.configure(
+                "TRadiobutton",
+                background=t["card_bg"],
+                foreground=t["fg"],
+                font=("sans-serif", 9, "bold"),
+                focuscolor=t["card_bg"],
+            )
+            self.style.map("TRadiobutton", background=[("active", t["card_bg"])])
+
+            self.style.configure(
+                "Horizontal.TScale",
+                background=t["card_bg"],
+                troughcolor=t["input_bg"],
+            )
+
+            self.style.configure(
+                "Horizontal.TProgressbar",
+                troughcolor=t["input_bg"],
+                background=t["accent"],
+                bordercolor=t["card_border"],
+                lightcolor=t["accent"],
+                darkcolor=t["accent"],
+            )
+
+            self.style.configure(
+                "Accent.TButton",
+                background=t["accent"],
+                foreground="#ffffff",
+                font=("sans-serif", 10, "bold"),
+                borderwidth=0,
+                padding=(16, 10),
+            )
+            self.style.map(
+                "Accent.TButton",
+                background=[("active", t["accent_hover"]), ("disabled", t["disabled_bg"])],
+                foreground=[("disabled", t["disabled_fg"])],
+            )
+
+            self.style.configure(
+                "Secondary.TButton",
+                background=t["btn_bg"],
+                foreground=t["fg"],
+                font=("sans-serif", 9),
+                borderwidth=0,
+                padding=(12, 6),
+            )
+            self.style.map(
+                "Secondary.TButton",
+                background=[("active", t["btn_hover"]), ("disabled", t["disabled_bg"])],
+                foreground=[("disabled", t["disabled_fg"])],
+            )
+
+            self.style.configure(
+                "Mini.TButton",
+                background=t["btn_bg"],
+                foreground=t["fg"],
+                font=("sans-serif", 8, "bold"),
+                borderwidth=0,
+                padding=(10, 4),
+            )
+            self.style.map(
+                "Mini.TButton",
+                background=[("active", t["btn_hover"])],
+            )
+
+            self.style.configure(
+                "ThemeActive.TButton",
+                background=t["accent"],
+                foreground="#ffffff",
+                font=("sans-serif", 8, "bold"),
+                borderwidth=0,
+                padding=(10, 5),
+            )
+            self.style.map(
+                "ThemeActive.TButton",
+                background=[("active", t["accent_hover"])],
+            )
+
+            self.style.configure(
+                "ThemeInactive.TButton",
+                background=t["btn_bg"],
+                foreground=t["muted"],
+                font=("sans-serif", 8),
+                borderwidth=0,
+                padding=(10, 5),
+            )
+            self.style.map(
+                "ThemeInactive.TButton",
+                background=[("active", t["btn_hover"])],
+                foreground=[("active", t["fg"])],
+            )
+
+            self.style.configure(
+                "TCombobox",
+                fieldbackground=t["btn_bg"],
+                background=t["btn_bg"],
+                foreground=t["fg"],
+                arrowcolor=t["fg"],
+                bordercolor=t["card_border"],
+                padding=(6, 4),
+            )
+            self.style.map(
+                "TCombobox",
+                fieldbackground=[("readonly", t["btn_bg"])],
+                foreground=[("readonly", t["fg"])],
+                selectbackground=[("readonly", t["btn_bg"])],
+                selectforeground=[("readonly", t["fg"])],
+            )
+
+            self.dark_btn.configure(
+                style="ThemeActive.TButton" if theme_name == "dark" else "ThemeInactive.TButton"
+            )
+            self.light_btn.configure(
+                style="ThemeActive.TButton" if theme_name == "light" else "ThemeInactive.TButton"
+            )
+
+            for card in self._card_frames:
+                card.configure(bg=t["card_bg"], highlightbackground=t["card_border"])
+            for hdr in self._card_headers:
+                hdr.configure(bg=t["card_bg"])
+            for title in self._card_titles:
+                title.configure(bg=t["card_bg"], fg=t["title_accent"])
+            for row in self._row_frames:
+                row.configure(bg=t["card_bg"])
+            for lbl in self._bold_labels:
+                lbl.configure(bg=t["card_bg"], fg=t["fg"])
+            for lbl in self._muted_labels:
+                lbl.configure(bg=t["card_bg"], fg=t["muted"])
+
+            self.badge_label.configure(bg=t["badge_bg"], fg=t["badge_fg"])
+
+            for wrap in self._entry_wrappers:
+                wrap.configure(bg=t["input_bg"], highlightbackground=t["card_border"])
+            for ent in self._entries_default:
+                ent.configure(bg=t["input_bg"], fg=t["fg"], insertbackground=t["fg"])
+
+            self.output_entry.configure(bg=t["input_bg"], fg=t["out_fg"], insertbackground=t["fg"])
+            self.tl_entry.configure(bg=t["input_bg"], fg=t["tl_fg"], insertbackground=t["fg"])
+            self.log_box.configure(bg=t["input_bg"], fg=t["log_fg"], insertbackground=t["fg"])
+
+        def _on_language_selected(self, _event=None) -> None:
+            chosen_label = self.lang_display_var.get()
+            new_lang = LABEL_TO_LANG.get(chosen_label, "pt_BR")
+            if new_lang == self.lang:
+                return
+            self.lang = new_lang
+            self.root.title(self.tr("window_title"))
+
+            for key, var in self._i18n_bindings:
+                var.set(self.tr(key))
+
+            self.status_var.set(self.tr(self._status_key))
+            self._update_run_label()
+            self._refresh_media_badge()
+            save_settings(self.lang, self.theme_name)
+
+        def _set_status(self, status_key: str) -> None:
+            self._status_key = status_key
+            self.status_var.set(self.tr(status_key))
+
+        def _refresh_media_badge(self) -> None:
+            if self._last_media_info is not None:
+                info = self._last_media_info
+                if info.has_video:
+                    self.media_badge_var.set(
+                        f"{info.width}x{info.height} • {info.fps:.2f} fps • {format_ts(info.duration)}"
+                    )
+                else:
+                    self.media_badge_var.set(self.tr("audio_badge", dur=format_ts(info.duration)))
+            elif self._last_media_name:
+                self.media_badge_var.set(self._last_media_name)
+            else:
+                self.media_badge_var.set(self.tr("no_file"))
+
+        # ----------------------------------------------------------------------
+        # Ações de Entrada, Saída e Execução
+        # ----------------------------------------------------------------------
 
         def _default_suffix(self) -> str:
             if self.import_tl_var.get().strip():
@@ -1118,23 +1642,23 @@ def launch_gui() -> None:
 
         def _update_run_label(self) -> None:
             if self.import_tl_var.get().strip():
-                self.run_btn.configure(text="Processar Timeline Importada")
+                self.run_btn.configure(text=self.tr("btn_run_tl"))
             elif self.scope_var.get() == "30s":
-                self.run_btn.configure(text="Executar Prévia (Primeiros 30s)")
+                self.run_btn.configure(text=self.tr("btn_run_30s"))
             else:
-                self.run_btn.configure(text="Executar no Vídeo Todo")
+                self.run_btn.configure(text=self.tr("btn_run_full"))
 
         def _probe_and_update_badge(self, media_path: Path) -> None:
             def worker() -> None:
                 try:
                     info = probe_media_info(media_path)
-                    if info.has_video:
-                        badge = f"{info.width}x{info.height} • {info.fps:.2f} fps • {format_ts(info.duration)}"
-                    else:
-                        badge = f"Áudio • {format_ts(info.duration)}"
-                    self.root.after(0, lambda: self.media_badge_var.set(badge))
+                    self._last_media_info = info
+                    self._last_media_name = media_path.name
+                    self.root.after(0, self._refresh_media_badge)
                 except Exception:
-                    self.root.after(0, lambda: self.media_badge_var.set(media_path.name))
+                    self._last_media_info = None
+                    self._last_media_name = media_path.name
+                    self.root.after(0, self._refresh_media_badge)
 
             threading.Thread(target=worker, daemon=True).start()
 
@@ -1144,21 +1668,21 @@ def launch_gui() -> None:
                 self.min_silence_var.set(0.35)
                 self.padding_var.set(0.08)
                 self.merge_gap_var.set(0.10)
-                self.append_log("Preset 'Dinâmico' aplicado (cortes rápidos e secos).")
+                self.append_log(self.tr("log_preset_dynamic"))
             elif mode == "narration":
                 self.threshold_var.set(-32.0)
                 self.min_silence_var.set(0.45)
                 self.padding_var.set(0.12)
                 self.merge_gap_var.set(0.15)
-                self.append_log("Preset 'Narração' aplicado (margem de respiro natural).")
+                self.append_log(self.tr("log_preset_narration"))
 
         def browse_input(self) -> None:
             from tkinter import filedialog
             path = filedialog.askopenfilename(
-                title="Selecione o arquivo de entrada original",
+                title=self.tr("dlg_in_title"),
                 filetypes=[
-                    ("Vídeos e Áudios", "*.mp4 *.mkv *.mov *.webm *.avi *.wav *.mp3 *.flac *.m4a"),
-                    ("Todos os arquivos", "*.*"),
+                    (self.tr("ft_media"), "*.mp4 *.mkv *.mov *.webm *.avi *.wav *.mp3 *.flac *.m4a"),
+                    (self.tr("ft_all"), "*.*"),
                 ],
             )
             if path:
@@ -1172,18 +1696,18 @@ def launch_gui() -> None:
             from tkinter import filedialog
             current = self.output_var.get().strip()
             init_dir = str(Path(current).parent) if current else str(Path.home())
-            init_name = Path(current).name if current else "saida_smartcut.mp4"
+            init_name = Path(current).name if current else "output_smartcut.mp4"
 
             path = filedialog.asksaveasfilename(
-                title="Definir arquivo e pasta de saída",
+                title=self.tr("dlg_out_file_title"),
                 initialdir=init_dir,
                 initialfile=init_name,
                 defaultextension=".mp4",
                 filetypes=[
-                    ("Vídeo MP4", "*.mp4"),
-                    ("Timeline FCPXML", "*.fcpxml"),
-                    ("Timeline EDL", "*.edl"),
-                    ("Todos os arquivos", "*.*"),
+                    (self.tr("ft_mp4"), "*.mp4"),
+                    (self.tr("ft_fcpxml"), "*.fcpxml"),
+                    (self.tr("ft_edl"), "*.edl"),
+                    (self.tr("ft_all"), "*.*"),
                 ],
             )
             if path:
@@ -1194,12 +1718,12 @@ def launch_gui() -> None:
             from tkinter import filedialog
             current = self.output_var.get().strip()
             init_dir = str(Path(current).parent) if current else str(Path.home())
-            folder = filedialog.askdirectory(title="Escolher pasta de saída", initialdir=init_dir)
+            folder = filedialog.askdirectory(title=self.tr("dlg_out_dir_title"), initialdir=init_dir)
             if folder:
                 stem = Path(current).stem if current else (
                     f"{Path(self.media_var.get().strip()).stem}{self._default_suffix()}"
                     if self.media_var.get().strip()
-                    else "saida_smartcut"
+                    else "output_smartcut"
                 )
                 self.output_var.set(str(Path(folder) / f"{stem}.mp4"))
                 self._output_manually_edited = True
@@ -1214,15 +1738,15 @@ def launch_gui() -> None:
             if target_dir and target_dir.exists():
                 subprocess.Popen(["xdg-open", str(target_dir)])
             else:
-                self.append_log("Nenhuma pasta de saída existente para abrir ainda.")
+                self.append_log(self.tr("log_no_out_dir"))
 
         def browse_timeline(self) -> None:
             from tkinter import filedialog
             path = filedialog.askopenfilename(
-                title="Importar timeline FCPXML ou EDL",
+                title=self.tr("dlg_tl_title"),
                 filetypes=[
-                    ("Timelines (FCPXML / EDL)", "*.fcpxml *.xml *.edl"),
-                    ("Todos os arquivos", "*.*"),
+                    (self.tr("ft_timelines"), "*.fcpxml *.xml *.edl"),
+                    (self.tr("ft_all"), "*.*"),
                 ],
             )
             if path:
@@ -1238,17 +1762,17 @@ def launch_gui() -> None:
                         self.media_var.set(str(media_ref))
                         self._probe_and_update_badge(media_ref)
                         self._sync_default_output(force=False)
-                        self.append_log(f"Timeline carregada: {tl_path.name} (mídia: {media_ref.name})")
+                        self.append_log(self.tr("log_tl_loaded", name=tl_path.name, media=media_ref.name))
                     else:
-                        self.append_log(f"Timeline carregada: {tl_path.name} (selecione a entrada original acima).")
+                        self.append_log(self.tr("log_tl_loaded_no_media", name=tl_path.name))
                 except Exception as exc:
-                    self.append_log(f"Aviso ao inspecionar timeline: {exc}")
+                    self.append_log(self.tr("log_tl_warn", err=exc))
 
         def clear_timeline(self) -> None:
             self.import_tl_var.set("")
             self._update_run_label()
             self._sync_default_output(force=False)
-            self.append_log("Timeline importada removida; modo automático reativado.")
+            self.append_log(self.tr("log_tl_cleared"))
 
         def append_log(self, text: str) -> None:
             def _write() -> None:
@@ -1266,7 +1790,7 @@ def launch_gui() -> None:
             raw_out = self.output_var.get().strip()
 
             if not raw_media and not raw_tl:
-                messagebox.showwarning("Aviso", "Selecione uma Entrada Original ou importe uma timeline FCPXML/EDL.")
+                messagebox.showwarning(self.tr("dlg_warn_title"), self.tr("dlg_warn_no_input"))
                 return
 
             media_path = Path(raw_media) if raw_media else None
@@ -1274,11 +1798,17 @@ def launch_gui() -> None:
             out_target = Path(raw_out) if raw_out else None
 
             if media_path and not media_path.exists():
-                messagebox.showerror("Erro", f"Arquivo de entrada não encontrado:\n{media_path}")
+                messagebox.showerror(
+                    self.tr("dlg_err_title"),
+                    self.tr("dlg_err_in_not_found", path=media_path),
+                )
                 return
 
             if tl_path and not tl_path.exists():
-                messagebox.showerror("Erro", f"Arquivo de timeline não encontrado:\n{tl_path}")
+                messagebox.showerror(
+                    self.tr("dlg_err_title"),
+                    self.tr("dlg_err_tl_not_found", path=tl_path),
+                )
                 return
 
             self.log_box.configure(state=tk.NORMAL)
@@ -1286,7 +1816,7 @@ def launch_gui() -> None:
             self.log_box.configure(state=tk.DISABLED)
 
             self.run_btn.configure(state=tk.DISABLED)
-            self.status_var.set("Processando...")
+            self._set_status("status_running")
             self.progress.start(12)
 
             max_dur = 30.0 if (self.scope_var.get() == "30s" and tl_path is None) else None
@@ -1304,6 +1834,7 @@ def launch_gui() -> None:
                 do_export_edl=bool(self.export_edl_var.get()),
                 render_mp4=bool(self.render_mp4_var.get()),
                 do_export_jsonl=bool(self.export_jsonl_var.get()),
+                lang=self.lang,
                 log=self.append_log,
             )
 
@@ -1311,10 +1842,10 @@ def launch_gui() -> None:
                 try:
                     saved_dir = run_pipeline(**params)
                     self._last_output_dir = saved_dir
-                    self.root.after(0, lambda: self.status_var.set("Concluído com sucesso"))
+                    self.root.after(0, lambda: self._set_status("status_done"))
                 except Exception as exc:
-                    self.append_log(f"\n[ERRO] {exc}")
-                    self.root.after(0, lambda: self.status_var.set("Erro durante a execução"))
+                    self.append_log(f"\n[ERROR] {exc}")
+                    self.root.after(0, lambda: self._set_status("status_error"))
                 finally:
                     self.root.after(0, self._on_finished)
 
@@ -1334,31 +1865,33 @@ def main() -> None:
         launch_gui()
         return
 
-    parser = argparse.ArgumentParser(description="SmartCut - Corte Automático + FCPXML/EDL + Render")
-    parser.add_argument("media", nargs="?", type=Path, help="Caminho do vídeo ou áudio de entrada original")
-    parser.add_argument("-o", "--output", type=Path, help="Pasta ou caminho base de saída dos arquivos")
-    parser.add_argument("--gui", action="store_true", help="Abre a interface gráfica")
-    parser.add_argument("--import-timeline", type=Path, help="Importa cortes de um arquivo .fcpxml ou .edl")
-    parser.add_argument("--preview-30s", action="store_true", help="Processa apenas os primeiros 30s")
-    parser.add_argument("--max-duration", type=float, default=None, help="Limita aos primeiros N segundos")
-    parser.add_argument("--threshold", type=float, default=-32.0, help="Limiar de silêncio em dB")
-    parser.add_argument("--min-silence", type=float, default=0.45, help="Silêncio mínimo em s")
-    parser.add_argument("--padding", type=float, default=0.12, help="Margem antes/depois da fala em s")
-    parser.add_argument("--min-clip", type=float, default=0.25, help="Duração mínima de trecho falado em s")
-    parser.add_argument("--merge-gap", type=float, default=0.15, help="Funde cortes próximos em s")
-    parser.add_argument("--no-fcpxml", action="store_true", help="Desativa exportação .fcpxml")
-    parser.add_argument("--fcpxml-out", type=Path, help="Caminho de saída do .fcpxml")
-    parser.add_argument("--no-edl", action="store_true", help="Desativa exportação .edl")
-    parser.add_argument("--edl-out", type=Path, help="Caminho de saída do .edl")
-    parser.add_argument("--render-mp4", action="store_true", help="Renderiza o MP4 cortado via FFmpeg")
-    parser.add_argument("--mp4-out", type=Path, help="Caminho de saída do MP4 renderizado")
-    parser.add_argument("--jsonl", type=Path, help="Exporta lista de cortes para arquivo .jsonl")
+    parser = argparse.ArgumentParser(description="SmartCut - Auto Silence Remover + FCPXML/EDL + Render")
+    parser.add_argument("media", nargs="?", type=Path, help="Path to original input video or audio")
+    parser.add_argument("-o", "--output", type=Path, help="Output folder or base file path")
+    parser.add_argument("--gui", action="store_true", help="Launch graphical interface")
+    parser.add_argument("--lang", choices=["pt", "en"], default="pt", help="CLI log language (pt or en)")
+    parser.add_argument("--import-timeline", type=Path, help="Import cuts from .fcpxml or .edl file")
+    parser.add_argument("--preview-30s", action="store_true", help="Process only first 30 seconds")
+    parser.add_argument("--max-duration", type=float, default=None, help="Limit processing to first N seconds")
+    parser.add_argument("--threshold", type=float, default=-32.0, help="Silence threshold in dB")
+    parser.add_argument("--min-silence", type=float, default=0.45, help="Minimum silence duration in s")
+    parser.add_argument("--padding", type=float, default=0.12, help="Padding before/after speech in s")
+    parser.add_argument("--min-clip", type=float, default=0.25, help="Minimum kept speech segment in s")
+    parser.add_argument("--merge-gap", type=float, default=0.15, help="Merge cuts closer than N seconds")
+    parser.add_argument("--no-fcpxml", action="store_true", help="Disable .fcpxml export")
+    parser.add_argument("--fcpxml-out", type=Path, help="Custom output path for .fcpxml")
+    parser.add_argument("--no-edl", action="store_true", help="Disable .edl export")
+    parser.add_argument("--edl-out", type=Path, help="Custom output path for .edl")
+    parser.add_argument("--render-mp4", action="store_true", help="Render cut MP4 via FFmpeg")
+    parser.add_argument("--mp4-out", type=Path, help="Custom output path for rendered MP4")
+    parser.add_argument("--jsonl", type=Path, help="Export cut list to .jsonl file")
     args = parser.parse_args()
 
     if not args.media and not args.import_timeline:
-        parser.error("Informe o caminho da mídia ou use --import-timeline <arquivo.fcpxml|arquivo.edl>.")
+        parser.error("Provide an input media path or use --import-timeline <file.fcpxml|file.edl>.")
 
     max_dur = 30.0 if args.preview_30s else args.max_duration
+    lang_code = "en_US" if args.lang == "en" else "pt_BR"
 
     run_pipeline(
         media_path=args.media,
@@ -1378,6 +1911,7 @@ def main() -> None:
         mp4_out=args.mp4_out,
         do_export_jsonl=bool(args.jsonl),
         jsonl_out=args.jsonl,
+        lang=lang_code,
     )
 
 
