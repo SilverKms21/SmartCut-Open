@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SmartCut - Corte Automático de Silêncios + FCPXML / EDL + Renderização (Windows & Linux)
+SmartCut - Corte Automático de Silêncios + FCPXML / EDL + Renderização (GUI + CLI)
 - Detecção de silêncio via FFmpeg (silencedetect)
 - Escopo selecionável: Apenas 30s (prévia rápida) ou Vídeo todo
 - Seleção explícita de Entrada Original e Saída do Arquivo
@@ -9,11 +9,9 @@ SmartCut - Corte Automático de Silêncios + FCPXML / EDL + Renderização (Wind
 """
 
 import argparse
-import ctypes
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,51 +21,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
-from urllib.parse import urlparse
-from urllib.request import url2pathname
-
-IS_WINDOWS = os.name == "nt"
-
-
-def _resolve_tool(tool_name: str) -> str:
-    """
-    Localiza ffmpeg/ffprobe na pasta do executável, no bundle PyInstaller,
-    na pasta do script ou no PATH do sistema.
-    """
-    exe_name = f"{tool_name}.exe" if IS_WINDOWS else tool_name
-    candidates: List[Path] = []
-
-    if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).resolve().parent / exe_name)
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            candidates.append(Path(meipass) / exe_name)
-
-    candidates.append(Path(__file__).resolve().parent / exe_name)
-
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
-
-    found = shutil.which(tool_name)
-    if found:
-        return found
-
-    if IS_WINDOWS:
-        raise FileNotFoundError(
-            f"'{exe_name}' não foi encontrado. Instale o FFmpeg no PATH ou coloque "
-            f"'{exe_name}' na mesma pasta do SmartCut ({Path(sys.executable).parent})."
-        )
-    raise FileNotFoundError(
-        f"'{tool_name}' não foi encontrado no PATH. Instale o pacote 'ffmpeg' no sistema."
-    )
-
-
-def _subprocess_kwargs() -> dict:
-    """Evita abrir janelas de console CMD piscando no Windows ao chamar FFmpeg."""
-    if IS_WINDOWS and hasattr(subprocess, "CREATE_NO_WINDOW"):
-        return {"creationflags": subprocess.CREATE_NO_WINDOW}
-    return {}
+from urllib.parse import unquote, urlparse
 
 
 @dataclass
@@ -96,15 +50,14 @@ class MediaInfo:
 
 def probe_media_info(media_path: Path) -> MediaInfo:
     """Obtém duração, resolução e taxa de quadros exata via ffprobe."""
-    ffprobe_bin = _resolve_tool("ffprobe")
     cmd = [
-        ffprobe_bin,
+        "ffprobe",
         "-v", "error",
         "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate",
         "-of", "json",
         str(media_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True, **_subprocess_kwargs())
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     data = json.loads(result.stdout)
 
     duration = float(data.get("format", {}).get("duration", 0.0))
@@ -143,8 +96,7 @@ def detect_silences(
     min_silence: float = 0.45,
     max_duration: Optional[float] = None,
 ) -> List[Segment]:
-    ffmpeg_bin = _resolve_tool("ffmpeg")
-    cmd = [ffmpeg_bin, "-hide_banner"]
+    cmd = ["ffmpeg", "-hide_banner"]
     if max_duration is not None:
         cmd.extend(["-t", f"{max_duration:.3f}"])
     cmd.extend([
@@ -153,7 +105,7 @@ def detect_silences(
         "-f", "null",
         "-",
     ])
-    result = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_kwargs())
+    result = subprocess.run(cmd, capture_output=True, text=True)
     stderr = result.stderr
 
     starts = [float(m) for m in re.findall(r"silence_start:\s*([0-9.]+)", stderr)]
@@ -442,7 +394,7 @@ def import_fcpxml(
         if src_uri:
             parsed = urlparse(src_uri)
             if parsed.scheme == "file":
-                local_path = Path(url2pathname(parsed.path))
+                local_path = Path(unquote(parsed.path))
                 asset_paths[aid] = local_path
             else:
                 asset_paths[aid] = Path(src_uri)
@@ -509,7 +461,6 @@ def render_cut_video(
     if not keep_segments:
         raise ValueError("Nenhum segmento com fala para renderizar.")
 
-    ffmpeg_bin = _resolve_tool("ffmpeg")
     filter_lines: List[str] = []
     concat_inputs: List[str] = []
 
@@ -540,7 +491,7 @@ def render_cut_video(
     try:
         filter_script_path.write_text("\n".join(filter_lines), encoding="utf-8")
         cmd = [
-            ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error",
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(media_path),
             "-filter_complex_script", str(filter_script_path),
         ]
@@ -565,7 +516,7 @@ def render_cut_video(
                 str(final_output),
             ])
 
-        subprocess.run(cmd, check=True, **_subprocess_kwargs())
+        subprocess.run(cmd, check=True)
         return final_output
     finally:
         filter_script_path.unlink(missing_ok=True)
@@ -728,38 +679,20 @@ def run_pipeline(
 
 
 # ==============================================================================
-# INTERFACE GRÁFICA MODERNIZADA (TKINTER - WINDOWS & LINUX)
+# INTERFACE GRÁFICA MODERNIZADA (TKINTER)
 # ==============================================================================
 
-def _enable_windows_dpi_awareness() -> None:
-    if not IS_WINDOWS:
-        return
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
-
-
 def launch_gui() -> None:
-    _enable_windows_dpi_awareness()
-
     try:
         import tkinter as tk
         from tkinter import filedialog, messagebox, scrolledtext, ttk
     except ImportError:
         print(
             "Erro: Tkinter não está instalado neste Python.\n"
-            "No Windows: reinstale o Python oficial marcando a opção 'tcl/tk and IDLE'.\n"
             "No Debian/Ubuntu/Linux Mint: sudo apt install python3-tk\n"
             "No Arch/Manjaro/BigLinux:     sudo pacman -S tk"
         )
         sys.exit(1)
-
-    ui_font = "Segoe UI" if IS_WINDOWS else "sans-serif"
-    mono_font = "Consolas" if IS_WINDOWS else "monospace"
 
     class SmartCutApp:
         def __init__(self, root: tk.Tk):
@@ -768,6 +701,7 @@ def launch_gui() -> None:
             self.root.geometry("760x760")
             self.root.minsize(680, 680)
 
+            # Paleta moderna escura (Slate / Obsidian)
             self.bg = "#0f1115"
             self.card_bg = "#161920"
             self.card_border = "#252a36"
@@ -778,10 +712,12 @@ def launch_gui() -> None:
             self.muted = "#94a3b8"
             self.accent = "#3b82f6"
             self.accent_hover = "#2563eb"
+            self.success = "#10b981"
 
             self.root.configure(bg=self.bg)
             self._setup_styles(ttk)
 
+            # Estado da interface
             self.media_var = tk.StringVar()
             self.output_var = tk.StringVar()
             self.import_tl_var = tk.StringVar()
@@ -810,16 +746,16 @@ def launch_gui() -> None:
 
             style.configure("TFrame", background=self.bg)
             style.configure("Card.TFrame", background=self.card_bg)
-            style.configure("TLabel", background=self.card_bg, foreground=self.fg, font=(ui_font, 9))
-            style.configure("Muted.TLabel", background=self.card_bg, foreground=self.muted, font=(ui_font, 8))
-            style.configure("Header.TLabel", background=self.bg, foreground=self.fg, font=(ui_font, 15, "bold"))
-            style.configure("Sub.TLabel", background=self.bg, foreground=self.muted, font=(ui_font, 9))
+            style.configure("TLabel", background=self.card_bg, foreground=self.fg, font=("sans-serif", 9))
+            style.configure("Muted.TLabel", background=self.card_bg, foreground=self.muted, font=("sans-serif", 8))
+            style.configure("Header.TLabel", background=self.bg, foreground=self.fg, font=("sans-serif", 15, "bold"))
+            style.configure("Sub.TLabel", background=self.bg, foreground=self.muted, font=("sans-serif", 9))
 
             style.configure(
                 "TCheckbutton",
                 background=self.card_bg,
                 foreground=self.fg,
-                font=(ui_font, 9),
+                font=("sans-serif", 9),
                 focuscolor=self.card_bg,
             )
             style.map("TCheckbutton", background=[("active", self.card_bg)])
@@ -828,7 +764,7 @@ def launch_gui() -> None:
                 "TRadiobutton",
                 background=self.card_bg,
                 foreground=self.fg,
-                font=(ui_font, 9, "bold"),
+                font=("sans-serif", 9, "bold"),
                 focuscolor=self.card_bg,
             )
             style.map("TRadiobutton", background=[("active", self.card_bg)])
@@ -852,7 +788,7 @@ def launch_gui() -> None:
                 "Accent.TButton",
                 background=self.accent,
                 foreground="#ffffff",
-                font=(ui_font, 10, "bold"),
+                font=("sans-serif", 10, "bold"),
                 borderwidth=0,
                 padding=(16, 10),
             )
@@ -866,7 +802,7 @@ def launch_gui() -> None:
                 "Secondary.TButton",
                 background=self.btn_bg,
                 foreground=self.fg,
-                font=(ui_font, 9),
+                font=("sans-serif", 9),
                 borderwidth=0,
                 padding=(12, 6),
             )
@@ -895,7 +831,7 @@ def launch_gui() -> None:
                 text=title.upper(),
                 bg=self.card_bg,
                 fg="#60a5fa",
-                font=(ui_font, 8, "bold"),
+                font=("sans-serif", 8, "bold"),
             ).pack(side=tk.LEFT)
 
             if right_widget_fn:
@@ -919,7 +855,7 @@ def launch_gui() -> None:
                 fg=fg_color or self.fg,
                 insertbackground=self.fg,
                 relief=tk.FLAT,
-                font=(ui_font, 9),
+                font=("sans-serif", 9),
             )
             entry.pack(fill=tk.X, padx=8, pady=5)
             return entry
@@ -963,29 +899,31 @@ def launch_gui() -> None:
                     textvariable=self.media_badge_var,
                     bg="#1e2430",
                     fg="#93c5fd",
-                    font=(ui_font, 8),
+                    font=("sans-serif", 8),
                     padx=8,
                     pady=2,
                 ).pack(side=tk.RIGHT)
 
             io_card = self._make_card(tk, main, "1. Entrada Original & Saída do Arquivo", add_media_badge)
 
+            # Linha Entrada Original
             in_row = tk.Frame(io_card, bg=self.card_bg)
             in_row.pack(fill=tk.X, pady=(0, 8))
             tk.Label(
                 in_row, text="Entrada Original:", width=14, anchor=tk.W,
-                bg=self.card_bg, fg=self.fg, font=(ui_font, 9, "bold"),
+                bg=self.card_bg, fg=self.fg, font=("sans-serif", 9, "bold"),
             ).pack(side=tk.LEFT)
             self._make_entry(tk, in_row, self.media_var)
             ttk.Button(
                 in_row, text="Escolher Entrada...", style="Secondary.TButton", command=self.browse_input
             ).pack(side=tk.RIGHT)
 
+            # Linha Saída do Arquivo
             out_row = tk.Frame(io_card, bg=self.card_bg)
             out_row.pack(fill=tk.X, pady=(0, 8))
             tk.Label(
                 out_row, text="Saída do Arquivo:", width=14, anchor=tk.W,
-                bg=self.card_bg, fg=self.fg, font=(ui_font, 9, "bold"),
+                bg=self.card_bg, fg=self.fg, font=("sans-serif", 9, "bold"),
             ).pack(side=tk.LEFT)
             out_entry = self._make_entry(tk, out_row, self.output_var, fg_color="#6ee7b7")
             out_entry.bind("<KeyRelease>", self._on_manual_output_edit)
@@ -997,11 +935,12 @@ def launch_gui() -> None:
                 out_row, text="Salvar Como...", style="Secondary.TButton", command=self.browse_output_file
             ).pack(side=tk.RIGHT)
 
+            # Linha Opcional: Importar Timeline Existente (FCPXML / EDL)
             tl_row = tk.Frame(io_card, bg=self.card_bg)
             tl_row.pack(fill=tk.X)
             tk.Label(
                 tl_row, text="Timeline (Opc.):", width=14, anchor=tk.W,
-                bg=self.card_bg, fg=self.muted, font=(ui_font, 9),
+                bg=self.card_bg, fg=self.muted, font=("sans-serif", 9),
             ).pack(side=tk.LEFT)
             self._make_entry(tk, tl_row, self.import_tl_var, fg_color="#93c5fd")
             ttk.Button(
@@ -1041,7 +980,7 @@ def launch_gui() -> None:
             scope_row.pack(fill=tk.X, pady=(0, 8))
 
             tk.Label(
-                scope_row, text="Escopo:", bg=self.card_bg, fg=self.muted, font=(ui_font, 9)
+                scope_row, text="Escopo:", bg=self.card_bg, fg=self.muted, font=("sans-serif", 9)
             ).pack(side=tk.LEFT, padx=(0, 12))
 
             ttk.Radiobutton(
@@ -1116,10 +1055,10 @@ def launch_gui() -> None:
             log_hdr = tk.Frame(log_card, bg=self.card_bg)
             log_hdr.pack(fill=tk.X, pady=(0, 4))
             tk.Label(
-                log_hdr, text="LOG DE EXECUÇÃO", bg=self.card_bg, fg="#60a5fa", font=(ui_font, 8, "bold")
+                log_hdr, text="LOG DE EXECUÇÃO", bg=self.card_bg, fg="#60a5fa", font=("sans-serif", 8, "bold")
             ).pack(side=tk.LEFT)
             tk.Label(
-                log_hdr, textvariable=self.status_var, bg=self.card_bg, fg=self.muted, font=(ui_font, 8)
+                log_hdr, textvariable=self.status_var, bg=self.card_bg, fg=self.muted, font=("sans-serif", 8)
             ).pack(side=tk.RIGHT)
 
             self.log_box = scrolledtext.ScrolledText(
@@ -1127,7 +1066,7 @@ def launch_gui() -> None:
                 height=7,
                 bg=self.input_bg,
                 fg="#cbd5e1",
-                font=(mono_font, 9),
+                font=("monospace", 9),
                 relief=tk.FLAT,
                 state=tk.DISABLED,
             )
@@ -1248,7 +1187,7 @@ def launch_gui() -> None:
                 ],
             )
             if path:
-                self.output_var.set(str(Path(path)))
+                self.output_var.set(path)
                 self._output_manually_edited = True
 
         def browse_output_dir(self) -> None:
@@ -1273,12 +1212,7 @@ def launch_gui() -> None:
                     p = Path(raw_out)
                     target_dir = p if p.is_dir() else p.parent
             if target_dir and target_dir.exists():
-                if IS_WINDOWS:
-                    os.startfile(str(target_dir))
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", str(target_dir)])
-                else:
-                    subprocess.Popen(["xdg-open", str(target_dir)])
+                subprocess.Popen(["xdg-open", str(target_dir)])
             else:
                 self.append_log("Nenhuma pasta de saída existente para abrir ainda.")
 
