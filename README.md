@@ -1,33 +1,35 @@
 # SmartCut
 
-Ferramenta de automação de edição de vídeo e áudio para **Linux** que analisa a faixa sonora via **FFmpeg** (`silencedetect`), remove pausas e silêncios automaticamente, exporta e importa timelines padronizadas em **FCPXML** e **EDL**, e renderiza prévias ou vídeos completos em **MP4**. Conta com interface gráfica bilíngue (**Português BR** / **English US**), alternância entre temas **Escuro** e **Claro**, e modo completo via linha de comando (CLI).
+**English** | [Português (BR)](README.pt-BR.md)
+
+An automated video and audio editing tool for **Linux** powered by **FFmpeg** (`silencedetect`). It automatically detects and removes pauses and silences, imports and exports standardized **FCPXML** and **EDL** timelines, and renders quick previews or full cuts directly to **MP4**. Includes a real-time bilingual GUI (**English US** / **Português BR**), **Dark** and **Light** themes, and a full Command-Line Interface (CLI).
 
 ---
 
-## Recursos
+## Features
 
-- **Interface Bilíngue em Tempo Real:** Alterne instantaneamente entre **Português (BR)** e **English (US)** diretamente pela barra superior da janela, traduzindo menus, parâmetros, diálogos e logs de execução sem reiniciar o aplicativo.
-- **Temas Escuro e Claro:** Troque entre os modos **Escuro** e **Claro** com um clique. Suas preferências de idioma e tema são salvas automaticamente em `~/.config/smartcut/settings.json`.
-- **Entrada Original e Saída Personalizável:** Selecione qualquer vídeo ou áudio de entrada (com detecção automática de resolução, FPS e duração) e defina livremente a pasta e o nome base dos arquivos exportados.
-- **Detecção Automática de Silêncios:** Ajuste fino de limiar em decibéis (`dB`), duração mínima de silêncio, margem de respiro (*padding*) e fusão de cortes próximos (*merge gap*), além dos presets rápidos **Dinâmico** (*Dynamic*) e **Narração** (*Narration*).
-- **Prévia Rápida (30s) ou Vídeo Completo:** Teste o ritmo dos cortes nos primeiros 30 segundos antes de processar o arquivo inteiro.
-- **Intercâmbio FCPXML 1.9, EDL CMX 3600 e JSONL:**
-  - **Exportação:** Gera `.fcpxml` (tempos racionais alinhados a quadros), `.edl` (timecodes SMPTE `HH:MM:SS:FF` baseados no FPS real do vídeo) e `.jsonl`.
-  - **Importação:** Carrega timelines `.fcpxml` ou `.edl` existentes para converter formatos entre si ou renderizar o vídeo cortado diretamente.
-- **Renderização Direta via FFmpeg:** Exporta vídeo cortado em `H.264 / AAC` (`libx264`, `-crf 20`) ou áudio em `.m4a`.
-- **Linha de Comando (CLI):** Automação completa via terminal com suporte ao idioma dos logs (`--lang pt` ou `--lang en`).
+- **Real-Time Bilingual Interface:** Switch instantly between **English (US)** and **Português (BR)** from the top bar, translating menus, parameters, dialogs, and execution logs without restarting the app.
+- **Dark & Light Themes:** Toggle between **Dark** and **Light** modes with one click. Language and theme preferences are automatically saved to `~/.config/smartcut/settings.json`.
+- **Original Input & Customizable Output:** Load any input video or audio file (with automatic detection of resolution, FPS, and duration) and freely choose the destination folder and base filename for exported files.
+- **Fine-Tuned Silence Detection:** Adjust decibel threshold (`dB`), minimum silence duration, speech padding, and merge gap, or apply built-in presets (**Dynamic** and **Narration**).
+- **Quick Preview (30s) or Full Video:** Test your cut pacing on the first 30 seconds before processing the entire file.
+- **FCPXML 1.9, EDL CMX 3600 & JSONL Interchange:**
+  - **Export:** Generates `.fcpxml` (frame-aligned rational timestamps), `.edl` (SMPTE `HH:MM:SS:FF` timecodes based on actual video FPS), and `.jsonl`.
+  - **Import:** Loads existing `.fcpxml` or `.edl` timelines to convert between formats or render the cut media directly.
+- **Direct FFmpeg Rendering:** Exports cut video in `H.264 / AAC` (`libx264`, `-crf 20`) or audio-only in `.m4a`.
+- **Command-Line Interface (CLI):** Full terminal automation with selectable log language (`--lang en` or `--lang pt`).
 
 ---
 
-## Pré-requisitos
+## Prerequisites
 
-O projeto utiliza exclusivamente a **biblioteca padrão do Python 3.9+** (sem pacotes externos via `pip`), exigindo apenas os utilitários do sistema:
+SmartCut uses only the **Python 3.9+ standard library** (zero external `pip` packages required) and relies on standard system utilities:
 
-- **Python 3.9 ou superior**
-- **FFmpeg e FFprobe** disponíveis no `PATH`
-- **Tkinter** (necessário apenas para a interface gráfica)
+- **Python 3.9 or higher**
+- **FFmpeg and FFprobe** available in your `PATH`
+- **Tkinter** (required only for the graphical interface)
 
-### Instalação das dependências no Linux
+### Installing System Dependencies on Linux
 
 - **Ubuntu / Debian / Linux Mint:**
   ```bash
@@ -40,69 +42,69 @@ O projeto utiliza exclusivamente a **biblioteca padrão do Python 3.9+** (sem pa
 
 ---
 
-## Instalação
+## Installation
 
-1. **Clone o repositório e dê permissão de execução ao script:**
+1. **Clone the repository and make the script executable:**
    ```bash
    git clone [https://github.com/SilverKms21/SmartCut-Open.git](https://github.com/SilverKms21/SmartCut-Open.git)
    cd SmartCut-Open
    chmod +x smartcut.py
    ```
 
-2. **(Opcional) Compile um executável único localmente com PyInstaller:**
+2. **(Optional) Build a standalone Linux executable locally with PyInstaller:**
 
-   Compilar diretamente na sua máquina garante compatibilidade total com o conjunto de instruções do seu processador:
+   Building locally ensures full instruction-set compatibility with your CPU:
    ```bash
    python3 -m venv .venv-build
    .venv-build/bin/pip install --upgrade pip pyinstaller
    .venv-build/bin/pyinstaller --onefile --windowed --name smartcut --hidden-import tkinter smartcut.py
    ```
 
-   Em seguida, escolha onde deseja salvar o binário gerado:
+   Then choose where to place the compiled binary:
 
-   - **Opção A — Manter o executável na mesma pasta do `smartcut.py` (portátil):**
+   - **Option A — Keep the executable in the same folder as `smartcut.py` (portable):**
      ```bash
      cp dist/smartcut ./smartcut
      rm -rf build dist smartcut.spec .venv-build
      ```
-     *(Para iniciar depois: `./smartcut`)*
+     *(Run later with: `./smartcut`)*
 
-   - **Opção B — Instalar no sistema para o seu usuário (`~/.local/bin`):**
+   - **Option B — Install for your user (`~/.local/bin`):**
      ```bash
      mkdir -p ~/.local/bin && cp dist/smartcut ~/.local/bin/smartcut
      rm -rf build dist smartcut.spec .venv-build
      ```
-     *(Para iniciar de qualquer diretório: `smartcut`)*
+     *(Run from anywhere with: `smartcut`)*
 
 ---
 
-## Como Usar
+## Usage
 
-### 1. Interface Gráfica (GUI)
+### 1. Graphical User Interface (GUI)
 
-Execute sem argumentos para abrir a janela principal:
+Run without arguments to launch the main window:
 
 ```bash
 ./smartcut.py
 ```
 
-1. **Idioma e Tema (Barra Superior):** Selecione **Português (BR)** ou **English (US)** no menu suspenso e alterne entre **Escuro** (*Dark*) e **Claro** (*Light*).
-2. **Entrada Original & Saída do Arquivo:** Clique em **Escolher Entrada...** para carregar o vídeo/áudio bruto e ajuste o destino em **Salvar Como...** ou **Pasta...** (ou importe uma timeline pronta em **Importar FCPXML / EDL...**).
-3. **Parâmetros de Corte Automático:** Ajuste os controles deslizantes ou aplique **Preset: Dinâmico** / **Preset: Narração**.
-4. **Duração & Formatos Exportados:** Selecione **Apenas 30s (Prévia rápida)** ou **Vídeo todo**, marque os formatos desejados (`.mp4`, `.fcpxml`, `.edl`, `.jsonl`) e clique em **Executar**.
+1. **Language & Theme (Top Bar):** Choose **English (US)** or **Português (BR)** from the dropdown menu and switch between **Dark** and **Light** themes.
+2. **Original Input & Output File:** Click **Browse Input...** to load your raw video/audio and set the destination using **Save As...** or **Folder...** (or load an existing timeline via **Import FCPXML / EDL...**).
+3. **Auto-Cut Parameters:** Fine-tune the sliders or click **Preset: Dynamic** / **Preset: Narration**.
+4. **Scope & Export Formats:** Choose **First 30s (Quick preview)** or **Full video**, check your desired output formats (`.mp4`, `.fcpxml`, `.edl`, `.jsonl`), and click **Run**.
 
 ---
 
-### 2. Linha de Comando (CLI)
+### 2. Command-Line Interface (CLI)
 
-Ao informar o arquivo de mídia ou timeline pelo terminal, o processamento ocorre sem abrir janela gráfica:
+Passing an input media or timeline path runs SmartCut directly in the terminal without opening a GUI window:
 
-- **Gerar prévia de 30s com MP4, FCPXML e EDL:**
+- **Generate a 30-second preview with MP4, FCPXML, and EDL:**
   ```bash
-  ./smartcut.py entrada.mp4 --preview-30s --render-mp4
+  ./smartcut.py input.mp4 --preview-30s --render-mp4 --lang en
   ```
 
-- **Processar o vídeo completo com logs em inglês e destino personalizado:**
+- **Process the full video with custom parameters and output path:**
   ```bash
   ./smartcut.py input.mp4 \
     -o ~/Videos/edited/final_video.mp4 \
@@ -114,42 +116,42 @@ Ao informar o arquivo de mídia ou timeline pelo terminal, o processamento ocorr
     --render-mp4
   ```
 
-- **Importar um `.edl` e exportar `.fcpxml` + MP4 cortado:**
+- **Import an `.edl` timeline and export `.fcpxml` + rendered MP4:**
   ```bash
-  ./smartcut.py --import-timeline corte.edl -o ~/Videos/editados/ --render-mp4
+  ./smartcut.py --import-timeline cut.edl -o ~/Videos/edited/ --render-mp4 --lang en
   ```
 
-### Opções da CLI
+### CLI Options
 
-| Flag | Padrão | Descrição |
+| Flag | Default | Description |
 | :--- | :--- | :--- |
-| `-o`, `--output CAMINHO` | Pasta da entrada | Define a pasta ou o nome base dos arquivos de saída |
-| `--gui` | — | Força a abertura da interface gráfica |
-| `--lang {pt,en}` | `pt` | Define o idioma das mensagens no terminal (`pt` ou `en`) |
-| `--preview-30s` | `False` | Limita a análise e renderização aos primeiros 30 segundos |
-| `--max-duration N` | `None` | Limita o processamento aos primeiros `N` segundos |
-| `--import-timeline ARQ` | `None` | Importa cortes de um arquivo `.fcpxml` ou `.edl` |
-| `--threshold DB` | `-32.0` | Limiar de volume abaixo do qual o trecho é considerado silêncio |
-| `--min-silence SEG` | `0.45` | Duração mínima de silêncio para efetuar o corte |
-| `--padding SEG` | `0.12` | Margem de segurança mantida antes e depois da fala |
-| `--min-clip SEG` | `0.25` | Duração mínima de um segmento falado mantido |
-| `--merge-gap SEG` | `0.15` | Funde segmentos separados por pausas menores que `SEG` |
-| `--render-mp4` | `False` | Renderiza o arquivo `.mp4` (ou `.m4a`) já cortado via FFmpeg |
-| `--no-fcpxml` / `--no-edl` | `False` | Desativa a exportação do respectivo formato de timeline |
-| `--jsonl ARQ` | `None` | Exporta a lista de cortes em arquivo `.jsonl` |
+| `-o`, `--output PATH` | Input folder | Set output folder or base filename |
+| `--gui` | — | Force launch the graphical interface |
+| `--lang {pt,en}` | `pt` | Set terminal log language (`pt` or `en`) |
+| `--preview-30s` | `False` | Limit analysis and rendering to the first 30 seconds |
+| `--max-duration N` | `None` | Limit processing to the first `N` seconds |
+| `--import-timeline FILE` | `None` | Import cuts from an `.fcpxml` or `.edl` file |
+| `--threshold DB` | `-32.0` | Volume threshold below which audio is treated as silence |
+| `--min-silence SEC` | `0.45` | Minimum silence duration required to trigger a cut |
+| `--padding SEC` | `0.12` | Safety margin kept before and after speech |
+| `--min-clip SEC` | `0.25` | Minimum duration of a kept speech segment |
+| `--merge-gap SEC` | `0.15` | Merge speech segments separated by gaps shorter than `SEC` |
+| `--render-mp4` | `False` | Render cut `.mp4` (or `.m4a`) via FFmpeg |
+| `--no-fcpxml` / `--no-edl` | `False` | Disable exporting the respective timeline format |
+| `--jsonl FILE` | `None` | Export cut list to a `.jsonl` file |
 
 ---
 
-## Arquivos Gerados e Configurações
+## Generated Files & Configuration
 
-- **Preferências da Interface:** Salvas automaticamente em `~/.config/smartcut/settings.json`.
-- **Saídas Padrão** (quando `-o` / `--output` não é informado):
-  - **Prévia (30s):** `<nome>_preview30s.mp4`, `<nome>_preview30s.fcpxml`, `<nome>_preview30s.edl`
-  - **Vídeo Completo:** `<nome>_smartcut.mp4`, `<nome>_smartcut.fcpxml`, `<nome>_smartcut.edl`
-  - **Timeline Importada:** `<nome>_imported.mp4`, `<nome>_imported.fcpxml`, `<nome>_imported.edl`
+- **UI Preferences:** Automatically saved to `~/.config/smartcut/settings.json`.
+- **Default Outputs** (when `-o` / `--output` is omitted):
+  - **Preview (30s):** `<name>_preview30s.mp4`, `<name>_preview30s.fcpxml`, `<name>_preview30s.edl`
+  - **Full Video:** `<name>_smartcut.mp4`, `<name>_smartcut.fcpxml`, `<name>_smartcut.edl`
+  - **Imported Timeline:** `<name>_imported.mp4`, `<name>_imported.fcpxml`, `<name>_imported.edl`
 
 ---
 
-## Licença
+## License
 
-Distribuído sob a licença **MIT**.
+Distributed under the **MIT** License.
